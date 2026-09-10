@@ -1,0 +1,846 @@
+:root {
+  --bg: var(--vscode-editor-background, #1e1e1e);
+  --fg: var(--vscode-editor-foreground, #d4d4d4);
+  --muted: var(--vscode-descriptionForeground, #9d9d9d);
+  --border: var(--vscode-panel-border, #3c3c3c);
+  --grid: color-mix(in srgb, var(--fg) 8%, transparent);
+  --accent-function: #3d9a7a;
+  --accent-arrow: #2f8f6e;
+  --accent-method: #4aab86;
+  --accent-class: #c4a35a;
+  --accent-module: #6b8cae;
+  --accent-import: #7a8f9e;
+  --accent-export: #8a7b9e;
+  --accent-external: #6e6e6e;
+  --accent-binding: #b07d4f;
+  --accent-call: #5a8fb8;
+  --accent-expression: #9a7bb8;
+  --edge-calls: #3d9a7a;
+  --edge-returns: #c4a35a;
+  --edge-param: #6b8cae;
+  --edge-thread: #b07d4f;
+  --edge-ref: #5a8fb8;
+  --edge-flow: #e05555;
+  --node-bg: color-mix(in srgb, var(--bg) 85%, #000);
+  --font: var(--vscode-editor-font-family, "Cascadia Code", "Fira Code", monospace);
+  --ui-font: var(--vscode-font-family, "Segoe UI", sans-serif);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui-font);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 92%, var(--accent-module));
+}
+
+.brand {
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.edge-toggles,
+.view-toggles {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 8%, var(--border));
+}
+
+.view-toggles {
+  margin-right: 4px;
+}
+
+.view-toggle.on {
+  --toggle-accent: var(--accent-module);
+}
+
+.edge-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--toggle-accent, var(--muted));
+  background: transparent;
+  opacity: 0.4;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.edge-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  opacity: 0.75;
+}
+
+.edge-toggle.on {
+  opacity: 1;
+  background: color-mix(in srgb, var(--toggle-accent) 18%, transparent);
+}
+
+.edge-toggle.off {
+  opacity: 0.35;
+  color: var(--muted);
+}
+
+.edge-toggle.off:hover {
+  opacity: 0.55;
+}
+
+.edge-toggle.mode-lines {
+  opacity: 1;
+  background: color-mix(in srgb, var(--toggle-accent) 18%, transparent);
+}
+
+.edge-toggle.mode-labels {
+  opacity: 1;
+  background: color-mix(in srgb, var(--toggle-accent) 28%, transparent);
+  box-shadow: inset 0 -2px 0 var(--toggle-accent);
+}
+
+.edge-toggle.mode-hidden {
+  opacity: 0.35;
+  color: var(--muted);
+}
+
+.edge-toggle.mode-hidden:hover {
+  opacity: 0.55;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.canvas .react-flow {
+  width: 100%;
+  height: 100%;
+}
+
+.status {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  padding: 32px;
+  text-align: center;
+  gap: 8px;
+}
+
+.status h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.status p {
+  margin: 0;
+  color: var(--muted);
+  max-width: 36rem;
+}
+
+.status-error p {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.status .meta {
+  font-family: var(--font);
+  font-size: 12px;
+}
+
+.struct-node {
+  position: relative;
+  min-width: 140px;
+  max-width: 200px;
+  padding: 8px 12px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-left: 3px solid var(--accent);
+  background: var(--node-bg);
+  box-shadow: 0 1px 0 color-mix(in srgb, #000 35%, transparent);
+  font-family: var(--font);
+  transition: border-color 120ms ease, box-shadow 160ms ease, transform 120ms ease;
+  overflow: visible;
+}
+
+.struct-node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 6px 18px color-mix(in srgb, #000 45%, transparent);
+  transform: translateY(-1px);
+}
+
+.class-header {
+  width: 184px;
+  max-width: none;
+  border-radius: 8px;
+}
+
+.class-header.expanded-decl {
+  width: 100%;
+  max-width: none;
+  border-radius: 10px;
+}
+
+.struct-extends {
+  font-size: 10px;
+  margin-top: 4px;
+  color: color-mix(in srgb, var(--accent-class) 75%, var(--fg));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.struct-extends.muted {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.method-block {
+  width: 184px;
+  max-width: none;
+  border-radius: 4px;
+  cursor: grab;
+}
+
+.method-block:active {
+  cursor: grabbing;
+}
+
+.method-block.member-constructor {
+  border-left-color: color-mix(in srgb, var(--accent-class) 70%, var(--accent-method));
+}
+
+.react-flow__node-classHeader {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.react-flow__node-methodBlock {
+  padding: 0;
+}
+
+.kind-function,
+.kind-arrow,
+.kind-method {
+  --accent: var(--accent-function);
+}
+.kind-arrow {
+  --accent: var(--accent-arrow);
+}
+.kind-method {
+  --accent: var(--accent-method);
+}
+.kind-class {
+  --accent: var(--accent-class);
+}
+.kind-module {
+  --accent: var(--accent-module);
+}
+
+.rail-block {
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.rail-block .struct-label {
+  font-size: 12px;
+}
+
+.rail-block .rail-meta {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.import-rail {
+  border-left-width: 3px;
+}
+
+.export-rail {
+  border-right-width: 3px;
+  border-left-width: 1px;
+}
+
+.react-flow__node-importRail,
+.react-flow__node-exportRail {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+.kind-import {
+  --accent: var(--accent-import);
+}
+.kind-export {
+  --accent: var(--accent-export);
+}
+.kind-external {
+  --accent: var(--accent-external);
+  opacity: 0.85;
+  border-style: dashed;
+}
+.kind-binding {
+  --accent: var(--accent-binding);
+}
+.kind-binding.kind-prop {
+  --accent: color-mix(in srgb, var(--accent-method) 55%, var(--accent-binding));
+}
+.kind-call {
+  --accent: var(--accent-call);
+  border-style: solid;
+}
+
+.kind-expression {
+  --accent: var(--accent-expression);
+  border-style: dashed;
+}
+
+.expandable {
+  cursor: pointer;
+}
+
+.has-action {
+  padding-right: 28px;
+}
+
+.node-action {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--node-bg) 88%, var(--accent));
+  color: var(--fg);
+  cursor: pointer;
+  opacity: 0.9;
+  line-height: 0;
+}
+
+.node-action:hover {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.node-action-icon {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.node-action svg {
+  display: block;
+  overflow: visible;
+}
+
+.struct-node.expanded-decl .node-action {
+  top: 6px;
+  right: 8px;
+}
+
+.decl-header {
+  position: relative;
+  z-index: 1;
+}
+
+.struct-node.expanded-decl {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: visible;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  transform: none;
+}
+
+.struct-node.expanded-decl.selected {
+  transform: none;
+}
+
+.struct-node.expanded-decl .decl-header {
+  flex: 0 0 auto;
+  padding: 8px 12px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--node-bg));
+}
+
+.struct-node.expanded-decl .expand-well {
+  flex: 1 1 auto;
+  margin: 10px;
+  min-height: 0;
+  position: relative;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, var(--border));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg) 55%, transparent),
+      color-mix(in srgb, var(--bg) 75%, transparent)
+    );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 4%, transparent);
+  pointer-events: none;
+  overflow: visible;
+}
+
+.well-param-name {
+  position: absolute;
+  left: 10px;
+  transform: translateY(-50%);
+  font-family: var(--font);
+  font-size: 10px;
+  color: color-mix(in srgb, var(--edge-param) 85%, var(--fg));
+  pointer-events: none;
+  white-space: nowrap;
+  padding-left: 10px;
+}
+
+.handle-well-param {
+  z-index: 3;
+  /* Sit on the well's left rail; Position.Right drives edge direction into the body. */
+  transform: translate(-50%, -50%) !important;
+}
+
+/* Outer RF chrome stays invisible — the struct-node is the only box. */
+.react-flow__node.expand-frame {
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.react-flow__node-structure {
+  padding: 0;
+}
+
+.handle-ref {
+  opacity: 0.85;
+  background: var(--edge-ref) !important;
+}
+
+.handle-param {
+  opacity: 0.9;
+  background: var(--edge-param) !important;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+/* Worker-flow: one visible square offset left; docks are invisible. */
+.flow-port {
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  pointer-events: none;
+}
+
+.flow-square {
+  position: absolute;
+  inset: 0;
+  background: var(--edge-flow);
+  border: 1px solid color-mix(in srgb, var(--edge-flow) 70%, #000);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.flow-port-ghost {
+  width: 7px;
+  height: 7px;
+}
+
+.react-flow__handle.handle-ghost {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+
+.flow-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: var(--edge-flow);
+  border: 1px solid color-mix(in srgb, var(--edge-flow) 70%, #000);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.flow-well-step {
+  position: absolute;
+  left: 12px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--edge-flow);
+  border: 1px solid color-mix(in srgb, var(--edge-flow) 70%, #000);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.flow-well-step-in {
+  top: 0;
+  transform: translateY(-50%);
+}
+
+.flow-well-step-out {
+  bottom: 0;
+  transform: translateY(50%);
+}
+
+.port-label {
+  position: absolute;
+  z-index: 5;
+  max-width: 72px;
+  padding: 1px 4px;
+  font-family: var(--font);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--edge-thread) 85%, var(--fg));
+  background: color-mix(in srgb, var(--node-bg) 88%, var(--edge-thread));
+  border: 1px solid color-mix(in srgb, var(--edge-thread) 45%, var(--border));
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  transform: translate(-100%, -50%);
+}
+
+.port-label-out,
+.port-label-return {
+  transform: translate(0, -50%);
+}
+
+.port-label-param {
+  transform: translate(-100%, -50%);
+}
+
+.port-label-in-top,
+.port-label-out-bottom,
+.port-label-this {
+  transform: translate(-50%, -100%);
+}
+
+.port-label-out-bottom {
+  transform: translate(-50%, 0);
+}
+
+.struct-ref-caption {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--edge-ref) 80%, var(--muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.struct-ref-caption.muted {
+  color: var(--muted);
+}
+
+.flow-stub-line {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  width: 11px;
+  height: 1.5px;
+  background: var(--edge-flow);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.react-flow__handle.handle-flow {
+  pointer-events: all !important;
+  width: 2px !important;
+  height: 2px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  opacity: 0 !important;
+  box-shadow: none !important;
+}
+
+.react-flow__handle.handle-flow-in {
+  /* Relative to .flow-port (already at -14px), dock to top of square */
+  left: 50% !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.react-flow__handle.handle-flow-out {
+  /* Relative to .flow-port, dock to bottom of square */
+  left: 50% !important;
+  top: 100% !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.react-flow__handle.handle-flow-well {
+  width: 7px !important;
+  height: 7px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  background: var(--edge-flow) !important;
+  border: 1px solid color-mix(in srgb, var(--edge-flow) 70%, #000) !important;
+  border-radius: 1px !important;
+  opacity: 1 !important;
+  z-index: 6;
+  pointer-events: all !important;
+}
+
+.struct-node.expanded-decl .expand-well .react-flow__handle.handle-flow-well-in {
+  top: 0 !important;
+  bottom: auto !important;
+  left: 20px !important;
+  right: auto !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.struct-node.expanded-decl .expand-well .react-flow__handle.handle-flow-well-out {
+  top: auto !important;
+  bottom: 0 !important;
+  left: 20px !important;
+  right: auto !important;
+  transform: translate(-50%, 50%) !important;
+}
+
+.handle-param-in {
+  opacity: 0.45;
+  background: var(--edge-param) !important;
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.handle-out {
+  background: var(--edge-returns) !important;
+}
+
+.handle-this {
+  opacity: 0.95;
+  background: var(--edge-thread) !important;
+  width: 8px !important;
+  height: 8px !important;
+}
+
+.handle-return,
+.handle-well-return {
+  opacity: 0.9;
+  background: var(--edge-returns) !important;
+  width: 8px !important;
+  height: 8px !important;
+  z-index: 3;
+  transform: translate(50%, -50%) !important;
+}
+
+.well-return-name {
+  position: absolute;
+  right: 18px;
+  transform: translateY(-50%);
+  font-family: var(--font);
+  font-size: 10px;
+  color: color-mix(in srgb, var(--edge-returns) 85%, var(--fg));
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.handle-result {
+  opacity: 0.7;
+  background: var(--edge-thread) !important;
+}
+
+.handle-binding-out {
+  background: var(--accent-binding) !important;
+}
+
+.param-chip {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.param-chip::before {
+  content: "· ";
+  opacity: 0.5;
+}
+
+.handle-top,
+.handle-bottom {
+  opacity: 0.4;
+}
+
+.react-flow__edge.edge-flow .react-flow__edge-path {
+  stroke: var(--edge-flow);
+  stroke-width: 1.75;
+  stroke-dasharray: 5 4;
+}
+
+.react-flow__edge.edge-ref .react-flow__edge-path {
+  stroke-dasharray: 6 4;
+}
+
+.react-flow__edge.edge-thread .react-flow__edge-path {
+  stroke-width: 2;
+}
+
+.struct-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.struct-kind-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--accent) 88%, var(--muted));
+  line-height: 0;
+}
+
+.struct-this-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--accent-method) 70%, var(--muted));
+  line-height: 0;
+  opacity: 0.95;
+}
+
+.struct-label {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.struct-params,
+.struct-returns {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.handle {
+  width: 7px !important;
+  height: 7px !important;
+  background: var(--accent) !important;
+  border: 1px solid var(--bg) !important;
+}
+
+.react-flow__edge-text {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+.react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  fill: var(--fg);
+}
+
+.react-flow__minimap {
+  background: color-mix(in srgb, var(--bg) 90%, #000) !important;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}

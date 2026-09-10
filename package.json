@@ -1,0 +1,66 @@
+{
+  "name": "cute-code",
+  "displayName": "Cute Code",
+  "description": "Visual structural AST view of JavaScript - functions, classes, calls, and returns as interconnected blocks.",
+  "version": "0.1.0",
+  "publisher": "cute-code",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onCommand:cuteCode.openStructureView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cuteCode.openStructureView",
+        "title": "Cute Code: Open Structure View",
+        "icon": "$(type-hierarchy)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "cuteCode.openStructureView",
+          "when": "resourceLangId == javascript || resourceLangId == javascriptreact",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "test": "node --import tsx --test src/parser/extractGraph.test.ts",
+    "vscode:prepublish": "npm run build"
+  },
+  "devDependencies": {
+    "@types/babel__parser": "^7.0.0",
+    "@types/babel__traverse": "^7.28.0",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.23.9",
+    "@babel/traverse": "^7.23.9",
+    "@babel/types": "^7.23.9",
+    "@dagrejs/dagre": "^1.1.2",
+    "@iconify/react": "^6.0.2",
+    "@iconify/types": "^2.0.0",
+    "@xyflow/react": "^12.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}
