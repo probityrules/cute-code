@@ -32,17 +32,110 @@ function locOf(node: t.Node): SourceLoc | undefined {
   };
 }
 
+/** Flatten pattern / param trees into bound identifier names (for params display). */
+function flattenBoundNames(node: t.Node | null | undefined): string[] {
+  if (!node) return [];
+  if (t.isIdentifier(node)) return [node.name];
+  if (t.isRestElement(node)) {
+    const inner = flattenBoundNames(node.argument);
+    return inner.map((n) => (n.startsWith("...") ? n : `...${n}`));
+  }
+  if (t.isAssignmentPattern(node)) return flattenBoundNames(node.left);
+  if (t.isTSParameterProperty(node)) return flattenBoundNames(node.parameter);
+  if (t.isObjectPattern(node)) {
+    const names: string[] = [];
+    for (const prop of node.properties) {
+      if (t.isRestElement(prop)) names.push(...flattenBoundNames(prop));
+      else if (t.isObjectProperty(prop)) names.push(...flattenBoundNames(prop.value as t.Node));
+    }
+    return names;
+  }
+  if (t.isArrayPattern(node)) {
+    const names: string[] = [];
+    for (const el of node.elements) {
+      if (el) names.push(...flattenBoundNames(el));
+    }
+    return names;
+  }
+  return [];
+}
+
 function paramNames(
   params: (t.Identifier | t.Pattern | t.RestElement | t.TSParameterProperty)[]
 ): string[] {
-  return params.map((p) => {
-    if (t.isIdentifier(p)) return p.name;
-    if (t.isRestElement(p) && t.isIdentifier(p.argument)) return `...${p.argument.name}`;
-    if (t.isAssignmentPattern(p) && t.isIdentifier(p.left)) return p.left.name;
-    if (t.isObjectPattern(p)) return "{…}";
-    if (t.isArrayPattern(p)) return "[…]";
-    return "?";
-  });
+  const names: string[] = [];
+  for (const p of params) {
+    const flat = flattenBoundNames(p);
+    if (flat.length > 0) names.push(...flat);
+    else if (t.isObjectPattern(p)) names.push("{…}");
+    else if (t.isArrayPattern(p)) names.push("[…]");
+    else names.push("?");
+  }
+  return names;
+}
+
+type PatternSlot = { name: string; pathLabel: string };
+
+/** Flatten ObjectPattern / ArrayPattern into named slots with dotted path labels. */
+function flattenPatternSlots(
+  pattern: t.LVal | t.Pattern,
+  pathPrefix = ""
+): PatternSlot[] {
+  const slots: PatternSlot[] = [];
+
+  function walk(node: t.Node | null | undefined, prefix: string) {
+    if (!node) return;
+    if (t.isIdentifier(node)) {
+      slots.push({ name: node.name, pathLabel: prefix || node.name });
+      return;
+    }
+    if (t.isAssignmentPattern(node)) {
+      walk(node.left, prefix);
+      return;
+    }
+    if (t.isRestElement(node)) {
+      if (t.isIdentifier(node.argument)) {
+        const n = node.argument.name;
+        slots.push({ name: n, pathLabel: prefix ? `${prefix}...${n}` : `...${n}` });
+      } else {
+        walk(node.argument, prefix ? `${prefix}...` : "...");
+      }
+      return;
+    }
+    if (t.isObjectPattern(node)) {
+      for (const prop of node.properties) {
+        if (t.isRestElement(prop)) {
+          walk(prop, prefix);
+          continue;
+        }
+        if (!t.isObjectProperty(prop)) continue;
+        let keyLabel = "?";
+        if (!prop.computed && t.isIdentifier(prop.key)) keyLabel = prop.key.name;
+        else if (t.isStringLiteral(prop.key)) keyLabel = prop.key.value;
+        const next = prefix ? `${prefix}.${keyLabel}` : keyLabel;
+        walk(prop.value as t.Node, next);
+      }
+      return;
+    }
+    if (t.isArrayPattern(node)) {
+      node.elements.forEach((el, i) => {
+        if (!el) return;
+        const next = prefix ? `${prefix}.${i}` : String(i);
+        walk(el, next);
+      });
+    }
+  }
+
+  walk(pattern, pathPrefix);
+  return slots;
+}
+
+function patternLabel(id: t.LVal, code: string): string {
+  const slice = sourceSlice(id, code);
+  if (slice && slice !== "…") return slice;
+  if (t.isObjectPattern(id)) return "{…}";
+  if (t.isArrayPattern(id)) return "[…]";
+  return "…";
 }
 
 function simpleReturnLabel(body: t.BlockStatement | t.Expression): string | undefined {
@@ -99,7 +192,9 @@ function isInlineExpression(node: t.Expression): boolean {
     t.isNumericLiteral(node) ||
     t.isStringLiteral(node) ||
     t.isNullLiteral(node) ||
-    t.isBigIntLiteral(node)
+    t.isBigIntLiteral(node) ||
+    t.isAwaitExpression(node) ||
+    t.isYieldExpression(node)
   );
 }
 
@@ -110,9 +205,35 @@ function sourceSlice(node: t.Node, code: string): string {
   return "…";
 }
 
+function jsxNameOf(name: t.JSXIdentifier | t.JSXMemberExpression | t.JSXNamespacedName): string {
+  if (t.isJSXIdentifier(name)) return name.name;
+  if (t.isJSXNamespacedName(name)) return `${name.namespace.name}:${name.name.name}`;
+  // Member: Foo.Bar
+  const parts: string[] = [];
+  let cur: t.JSXIdentifier | t.JSXMemberExpression = name;
+  while (t.isJSXMemberExpression(cur)) {
+    parts.unshift(cur.property.name);
+    cur = cur.object;
+  }
+  if (t.isJSXIdentifier(cur)) parts.unshift(cur.name);
+  return parts.join(".") || "JSX";
+}
+
+function jsxRootIdentifier(
+  name: t.JSXIdentifier | t.JSXMemberExpression | t.JSXNamespacedName
+): string | undefined {
+  if (t.isJSXIdentifier(name)) return name.name;
+  if (t.isJSXMemberExpression(name)) {
+    let cur: t.JSXIdentifier | t.JSXMemberExpression = name;
+    while (t.isJSXMemberExpression(cur)) cur = cur.object;
+    return t.isJSXIdentifier(cur) ? cur.name : undefined;
+  }
+  return undefined;
+}
+
 type ExprInput =
   | { kind: "id"; name: string }
-  | { kind: "call"; node: t.CallExpression | t.NewExpression; label: string };
+  | { kind: "call"; node: t.CallExpression | t.NewExpression | t.OptionalCallExpression; label: string };
 
 /** Free identifiers and nested call/new roots feeding an inline expression. */
 function collectExprInputs(expr: t.Expression): ExprInput[] {
@@ -126,7 +247,7 @@ function collectExprInputs(expr: t.Expression): ExprInput[] {
     if (t.isIdentifier(node)) {
       if (
         parent &&
-        t.isMemberExpression(parent) &&
+        (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) &&
         parent.property === node &&
         !parent.computed
       ) {
@@ -147,19 +268,20 @@ function collectExprInputs(expr: t.Expression): ExprInput[] {
       return;
     }
 
-    if (t.isCallExpression(node) || t.isNewExpression(node)) {
+    if (t.isCallExpression(node) || t.isNewExpression(node) || t.isOptionalCallExpression(node)) {
       if (!seenCalls.has(node)) {
         seenCalls.add(node);
         let label = "()";
         if (t.isNewExpression(node) && t.isIdentifier(node.callee)) {
           label = `new ${node.callee.name}()`;
-        } else if (t.isCallExpression(node)) {
-          if (t.isIdentifier(node.callee)) label = `${node.callee.name}()`;
+        } else if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
+          const callee = node.callee;
+          if (t.isIdentifier(callee)) label = `${callee.name}()`;
           else if (
-            t.isMemberExpression(node.callee) &&
-            t.isIdentifier(node.callee.property)
+            (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)) &&
+            t.isIdentifier(callee.property)
           ) {
-            label = `${node.callee.property.name}()`;
+            label = `${callee.property.name}()`;
           } else label = "call()";
         }
         inputs.push({ kind: "call", node, label });
@@ -185,6 +307,17 @@ function collectExprInputs(expr: t.Expression): ExprInput[] {
 
   walk(expr, null);
   return inputs;
+}
+
+function isCallLike(
+  node: t.Node
+): node is t.CallExpression | t.NewExpression | t.OptionalCallExpression | t.ImportExpression {
+  return (
+    t.isCallExpression(node) ||
+    t.isNewExpression(node) ||
+    t.isOptionalCallExpression(node) ||
+    t.isImportExpression(node)
+  );
 }
 
 export type ExtractResult =
@@ -217,10 +350,23 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
   const nameToId = new Map<string, string>();
   /** binding name → binding node id within scope (scopeId::name) */
   const bindingIds = new Map<string, string>();
+  /** AST node → expandable scope id (branch/loop/try/jsx/fragment) */
+  const scopeIdByAst = new WeakMap<object, string>();
+  /** Deferred export rails created after decls exist */
+  const pendingExports: {
+    name: string;
+    line: number;
+    localName: string;
+    label?: string;
+  }[] = [];
+  /** Class field inits to thread in pass 2 */
+  const pendingFieldInits: { propId: string; init: t.Expression; scopeId: string }[] = [];
   let edgeSeq = 0;
   let callSeq = 0;
   let exprSeq = 0;
   let propSeq = 0;
+  let controlSeq = 0;
+  let jsxSeq = 0;
 
   nodes.push({
     id: MODULE_ID,
@@ -268,17 +414,13 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     return id;
   }
 
-  function enclosingScopeId(path: NodePath): string {
-    const fn = path.findParent(
-      (p) =>
-        p.isFunctionDeclaration() ||
-        p.isFunctionExpression() ||
-        p.isArrowFunctionExpression() ||
-        p.isClassMethod() ||
-        p.isClassPrivateMethod()
-    );
-    if (!fn) return MODULE_ID;
+  function pathUnder(region: NodePath | null | undefined, path: NodePath): boolean {
+    if (!region || !region.node) return false;
+    if (path.node === region.node) return true;
+    return Boolean(path.findParent((p) => p.node === region.node));
+  }
 
+  function functionScopeId(fn: NodePath): string | undefined {
     if (fn.isFunctionDeclaration() && fn.node.id) {
       const id = `fn:${fn.node.id.name}:L${fn.node.loc?.start.line ?? 0}`;
       return nameToId.get(fn.node.id.name) === id
@@ -307,14 +449,72 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       const mid = `method:${className}.${methodName}:L${fn.node.loc?.start.line ?? 0}`;
       return nameToId.get(`${className}.${methodName}`) ?? nameToId.get(methodName) ?? mid;
     }
-    return MODULE_ID;
+    return undefined;
   }
 
-  // Pass 1: declarations (functions, classes, methods, arrows)
+  function enclosingScopeId(path: NodePath): string {
+    const scope = path.findParent((p) => {
+      if (
+        p.isFunctionDeclaration() ||
+        p.isFunctionExpression() ||
+        p.isArrowFunctionExpression() ||
+        p.isClassMethod() ||
+        p.isClassPrivateMethod()
+      ) {
+        return true;
+      }
+      if (!scopeIdByAst.has(p.node)) return false;
+
+      if (p.isIfStatement()) {
+        return (
+          pathUnder(p.get("consequent") as NodePath, path) ||
+          pathUnder(p.get("alternate") as NodePath | null, path)
+        );
+      }
+      if (p.isSwitchStatement()) {
+        for (const c of p.get("cases") as NodePath[]) {
+          if (pathUnder(c, path)) return true;
+        }
+        return false;
+      }
+      if (
+        p.isForStatement() ||
+        p.isForOfStatement() ||
+        p.isForInStatement() ||
+        p.isWhileStatement() ||
+        p.isDoWhileStatement()
+      ) {
+        return pathUnder(p.get("body") as NodePath, path);
+      }
+      if (p.isTryStatement()) {
+        return (
+          pathUnder(p.get("block") as NodePath, path) ||
+          pathUnder(p.get("handler") as NodePath | null, path) ||
+          pathUnder(p.get("finalizer") as NodePath | null, path)
+        );
+      }
+      if (p.isJSXElement() || p.isJSXFragment()) {
+        return pathUnder(p, path) && path.node !== p.node;
+      }
+      return true;
+    });
+
+    if (!scope) return MODULE_ID;
+
+    const controlId = scopeIdByAst.get(scope.node);
+    if (controlId) return controlId;
+
+    return functionScopeId(scope) ?? MODULE_ID;
+  }
+
+  function registerBinding(scopeId: string, label: string, id: string) {
+    bindingIds.set(`${scopeId}::${label}`, id);
+  }
+
+  // Pass 1: declarations (functions, classes, methods, arrows, control, jsx, module)
   traverse(ast, {
     FunctionDeclaration(path) {
       if (!path.node.id) return;
-      // Skip if nested walk will also hit — we want all
       const name = path.node.id.name;
       const id = `fn:${name}:L${path.node.loc?.start.line ?? 0}`;
       const outerScope = enclosingScopeId(path);
@@ -330,6 +530,8 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         parentId: outerScope === MODULE_ID ? MODULE_ID : outerScope,
         scopeId: outerScope,
         expandable: true,
+        async: path.node.async || undefined,
+        generator: path.node.generator || undefined,
       });
     },
 
@@ -365,88 +567,177 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
 
       let stackOrder = 0;
       for (const member of path.node.body.body) {
-        if (!t.isClassMethod(member) && !t.isClassPrivateMethod(member)) continue;
+        if (t.isClassMethod(member) || t.isClassPrivateMethod(member)) {
+          let methodName = "method";
+          if (member.kind === "constructor") methodName = "constructor";
+          else if (t.isIdentifier(member.key)) methodName = member.key.name;
+          else if (t.isStringLiteral(member.key)) methodName = member.key.value;
+          else if (t.isPrivateName(member.key) && t.isIdentifier(member.key.id)) {
+            methodName = `#${member.key.id.name}`;
+          }
 
-        let methodName = "method";
-        if (member.kind === "constructor") methodName = "constructor";
-        else if (t.isIdentifier(member.key)) methodName = member.key.name;
-        else if (t.isStringLiteral(member.key)) methodName = member.key.value;
-        else if (t.isPrivateName(member.key) && t.isIdentifier(member.key.id)) {
-          methodName = `#${member.key.id.name}`;
+          const memberKind: MemberKind =
+            member.kind === "constructor"
+              ? "constructor"
+              : member.kind === "get"
+                ? "get"
+                : member.kind === "set"
+                  ? "set"
+                  : "method";
+
+          const mid = `method:${name}.${methodName}:L${member.loc?.start.line ?? 0}`;
+          nameToId.set(`${name}.${methodName}`, mid);
+          nameToId.set(methodName, mid);
+          addNode({
+            id: mid,
+            kind: "method",
+            label: methodName,
+            params: paramNames(member.params),
+            returnsLabel: t.isBlockStatement(member.body)
+              ? simpleReturnLabel(member.body)
+              : undefined,
+            loc: locOf(member),
+            parentId: classId,
+            scopeId: classId,
+            stackOrder: stackOrder++,
+            memberKind,
+            expandable: true,
+            async: member.async || undefined,
+            generator: member.generator || undefined,
+            static: member.static || undefined,
+          });
+          continue;
         }
 
-        const memberKind: MemberKind =
-          member.kind === "constructor"
-            ? "constructor"
-            : member.kind === "get"
-              ? "get"
-              : member.kind === "set"
-                ? "set"
-                : "method";
+        if (t.isClassProperty(member) || t.isClassPrivateProperty(member)) {
+          let propName = "prop";
+          if (t.isClassPrivateProperty(member) && t.isPrivateName(member.key)) {
+            propName = `#${member.key.id.name}`;
+          } else if (t.isIdentifier(member.key)) {
+            propName = member.key.name;
+          } else if (t.isStringLiteral(member.key)) {
+            propName = member.key.value;
+          } else if (t.isPrivateName(member.key) && t.isIdentifier(member.key.id)) {
+            propName = `#${member.key.id.name}`;
+          }
 
-        const mid = `method:${name}.${methodName}:L${member.loc?.start.line ?? 0}`;
-        nameToId.set(`${name}.${methodName}`, mid);
-        nameToId.set(methodName, mid);
-        addNode({
-          id: mid,
-          kind: "method",
-          label: methodName,
-          params: paramNames(member.params),
-          returnsLabel: t.isBlockStatement(member.body)
-            ? simpleReturnLabel(member.body)
-            : undefined,
-          loc: locOf(member),
-          parentId: classId,
-          scopeId: classId,
-          stackOrder: stackOrder++,
-          memberKind,
-          expandable: true,
-        });
+          const line = member.loc?.start.line ?? 0;
+          const propId = `prop:${name}.${propName}:L${line}:${stackOrder}`;
+          addNode({
+            id: propId,
+            kind: "binding",
+            label: propName,
+            params: [],
+            bindingKind: "prop",
+            loc: locOf(member),
+            parentId: classId,
+            scopeId: classId,
+            stackOrder: stackOrder++,
+            static: member.static || undefined,
+          });
+          registerBinding(classId, propName, propId);
+          if (member.value && t.isExpression(member.value)) {
+            pendingFieldInits.push({ propId, init: member.value, scopeId: classId });
+          }
+        }
       }
     },
 
     VariableDeclarator(path) {
-      if (!t.isIdentifier(path.node.id)) return;
       const init = path.node.init;
-      const name = path.node.id.name;
       const outerScope = path.parentPath ? enclosingScopeId(path.parentPath) : MODULE_ID;
       const line = path.node.loc?.start.line ?? 0;
+      const bk = bindingKindOf(path);
 
-      if (init && (t.isFunctionExpression(init) || t.isArrowFunctionExpression(init))) {
-        const kind = t.isArrowFunctionExpression(init) ? "arrow" : "function";
-        const id = `${kind === "arrow" ? "arrow" : "fn"}:${name}:L${line}`;
-        nameToId.set(name, id);
+      if (t.isIdentifier(path.node.id)) {
+        const name = path.node.id.name;
+
+        if (init && (t.isFunctionExpression(init) || t.isArrowFunctionExpression(init))) {
+          const kind = t.isArrowFunctionExpression(init) ? "arrow" : "function";
+          const id = `${kind === "arrow" ? "arrow" : "fn"}:${name}:L${line}`;
+          nameToId.set(name, id);
+          addNode({
+            id,
+            kind,
+            label: name,
+            params: paramNames(init.params),
+            returnsLabel: simpleReturnLabel(init.body),
+            loc: locOf(path.node),
+            parentId: outerScope === MODULE_ID ? MODULE_ID : outerScope,
+            scopeId: outerScope,
+            expandable: true,
+            async: init.async || undefined,
+            generator: t.isFunctionExpression(init) ? init.generator || undefined : undefined,
+          });
+          return;
+        }
+
+        const id = `binding:${name}:L${line}`;
         addNode({
           id,
-          kind,
+          kind: "binding",
           label: name,
-          params: paramNames(init.params),
-          returnsLabel: simpleReturnLabel(init.body),
+          params: [],
+          bindingKind: bk,
           loc: locOf(path.node),
-          parentId: outerScope === MODULE_ID ? MODULE_ID : outerScope,
           scopeId: outerScope,
-          expandable: true,
+          parentId: outerScope === MODULE_ID ? undefined : outerScope,
         });
         return;
       }
 
-      // Plain binding (const/let/var)
-      const id = `binding:${name}:L${line}`;
-      const bk = bindingKindOf(path);
-      addNode({
-        id,
-        kind: "binding",
-        label: name,
-        params: [],
-        bindingKind: bk,
-        loc: locOf(path.node),
-        scopeId: outerScope,
-        parentId: outerScope === MODULE_ID ? undefined : outerScope,
-      });
+      // Destructuring: parent pattern + child slots
+      if (t.isObjectPattern(path.node.id) || t.isArrayPattern(path.node.id)) {
+        const slots = flattenPatternSlots(path.node.id);
+        const label = patternLabel(path.node.id, code);
+        const parentId = `binding:pattern:L${line}:C${path.node.loc?.start.column ?? 0}`;
+        addNode({
+          id: parentId,
+          kind: "binding",
+          label,
+          params: slots.map((s) => s.name),
+          bindingKind: bk,
+          loc: locOf(path.node),
+          scopeId: outerScope,
+          parentId: outerScope === MODULE_ID ? undefined : outerScope,
+          pattern: true,
+        });
+
+        for (const slot of slots) {
+          const slotId = `binding:${slot.name}:L${line}:slot`;
+          addNode({
+            id: slotId,
+            kind: "binding",
+            label: slot.pathLabel.includes(".") ? slot.pathLabel : slot.name,
+            params: [],
+            bindingKind: bk,
+            loc: locOf(path.node),
+            scopeId: outerScope,
+            parentId: parentId,
+            slotOf: parentId,
+          });
+          registerBinding(outerScope, slot.name, slotId);
+        }
+      }
     },
 
     ImportDeclaration(path) {
       const source = path.node.source.value;
+      if (path.node.specifiers.length === 0) {
+        const id = `import:side:${source}:L${path.node.loc?.start.line ?? 0}`;
+        addNode({
+          id,
+          kind: "import",
+          label: JSON.stringify(source),
+          params: [],
+          loc: locOf(path.node),
+          parentId: MODULE_ID,
+          scopeId: MODULE_ID,
+          returnsLabel: source,
+          importSource: source,
+        });
+        return;
+      }
       for (const spec of path.node.specifiers) {
         let local = "";
         if (t.isImportDefaultSpecifier(spec) || t.isImportNamespaceSpecifier(spec)) {
@@ -472,7 +763,34 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     },
 
     ExportNamedDeclaration(path) {
-      if (path.node.declaration) return;
+      if (path.node.declaration) {
+        const decl = path.node.declaration;
+        const line = path.node.loc?.start.line ?? 0;
+        if (t.isFunctionDeclaration(decl) && decl.id) {
+          pendingExports.push({ name: decl.id.name, line, localName: decl.id.name });
+        } else if (t.isClassDeclaration(decl) && decl.id) {
+          pendingExports.push({ name: decl.id.name, line, localName: decl.id.name });
+        } else if (t.isVariableDeclaration(decl)) {
+          for (const d of decl.declarations) {
+            if (t.isIdentifier(d.id)) {
+              pendingExports.push({
+                name: d.id.name,
+                line: d.loc?.start.line ?? line,
+                localName: d.id.name,
+              });
+            } else if (t.isObjectPattern(d.id) || t.isArrayPattern(d.id)) {
+              for (const slot of flattenPatternSlots(d.id)) {
+                pendingExports.push({
+                  name: slot.name,
+                  line: d.loc?.start.line ?? line,
+                  localName: slot.name,
+                });
+              }
+            }
+          }
+        }
+        return;
+      }
       for (const spec of path.node.specifiers) {
         if (!t.isExportSpecifier(spec) || !t.isIdentifier(spec.exported)) continue;
         const name = spec.exported.name;
@@ -510,6 +828,31 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       });
       const decl = path.node.declaration;
       if (t.isIdentifier(decl)) {
+        pendingExports.push({
+          name: "default",
+          line: path.node.loc?.start.line ?? 0,
+          localName: decl.name,
+          label: "default",
+        });
+      } else if (t.isFunctionDeclaration(decl) && decl.id) {
+        pendingExports.push({
+          name: "default",
+          line: path.node.loc?.start.line ?? 0,
+          localName: decl.id.name,
+          label: "default",
+        });
+      } else if (t.isClassDeclaration(decl) && decl.id) {
+        pendingExports.push({
+          name: "default",
+          line: path.node.loc?.start.line ?? 0,
+          localName: decl.id.name,
+          label: "default",
+        });
+      } else if (t.isFunctionDeclaration(decl) || t.isClassDeclaration(decl)) {
+        // anonymous default — rail already created
+      }
+      // Keep immediate link attempt for identifier (same as before) when already known
+      if (t.isIdentifier(decl)) {
         const target = nameToId.get(decl.name);
         if (target) {
           addEdge("returns", target, id, "default", {
@@ -517,15 +860,295 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
             targetHandle: "in",
           });
         }
-      } else if (t.isFunctionDeclaration(decl) && decl.id) {
-        const target = nameToId.get(decl.id.name);
-        if (target) {
-          addEdge("returns", target, id, "default", {
-            sourceHandle: "out",
-            targetHandle: "in",
-          });
+      }
+    },
+
+    ExportAllDeclaration(path) {
+      const source = path.node.source.value;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `export:star:${source}:L${line}`;
+      addNode({
+        id,
+        kind: "export",
+        label: `* from ${JSON.stringify(source)}`,
+        params: [],
+        loc: locOf(path.node),
+        parentId: MODULE_ID,
+        scopeId: MODULE_ID,
+        importSource: source,
+      });
+    },
+
+    IfStatement(path) {
+      // Only create one node per if (skip else-if chains creating nested — each if gets a node)
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `branch:if:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "branch",
+        label: "if",
+        params: ["cond"],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        branchKind: "if",
+      });
+    },
+
+    SwitchStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `branch:switch:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "branch",
+        label: "switch",
+        params: ["cond"],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        branchKind: "switch",
+      });
+    },
+
+    ForStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `loop:for:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "loop",
+        label: "for",
+        params: [],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        loopKind: "for",
+      });
+    },
+
+    ForOfStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `loop:for-of:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "loop",
+        label: "for-of",
+        params: [],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        loopKind: "for-of",
+      });
+    },
+
+    ForInStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `loop:for-in:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "loop",
+        label: "for-in",
+        params: [],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        loopKind: "for-in",
+      });
+    },
+
+    WhileStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `loop:while:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "loop",
+        label: "while",
+        params: ["cond"],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        loopKind: "while",
+      });
+    },
+
+    DoWhileStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `loop:do:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "loop",
+        label: "do-while",
+        params: ["cond"],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+        loopKind: "do",
+      });
+    },
+
+    TryStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `try:L${line}:${controlSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      addNode({
+        id,
+        kind: "try",
+        label: "try",
+        params: [],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: true,
+      });
+      const handler = path.node.handler;
+      if (handler?.param) {
+        const names = flattenBoundNames(handler.param);
+        const catchName = names[0] ?? "err";
+        const catchId = `binding:${catchName}:L${handler.loc?.start.line ?? line}`;
+        addNode({
+          id: catchId,
+          kind: "binding",
+          label: catchName,
+          params: [],
+          bindingKind: "let",
+          loc: locOf(handler.param),
+          scopeId: id,
+          parentId: id,
+        });
+        registerBinding(id, catchName, catchId);
+      }
+    },
+
+    ThrowStatement(path) {
+      controlSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const id = `throw:L${line}:${controlSeq}`;
+      const scopeId = enclosingScopeId(path);
+      addNode({
+        id,
+        kind: "throw",
+        label: "throw",
+        params: path.node.argument && t.isIdentifier(path.node.argument)
+          ? [path.node.argument.name]
+          : ["value"],
+        loc: locOf(path.node),
+        scopeId,
+        parentId: scopeId === MODULE_ID ? undefined : scopeId,
+      });
+    },
+
+    JSXElement(path) {
+      // Only top-level elements relative to nested JSX — visit all; nested get jsx scope
+      jsxSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const col = path.node.loc?.start.column ?? 0;
+      const tag = jsxNameOf(path.node.openingElement.name);
+      const id = `jsx:${tag}:L${line}:C${col}:${jsxSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+
+      const propNames: string[] = [];
+      let hasRest = false;
+      for (const attr of path.node.openingElement.attributes) {
+        if (t.isJSXSpreadAttribute(attr)) {
+          hasRest = true;
+          continue;
+        }
+        if (t.isJSXAttribute(attr)) {
+          if (t.isJSXIdentifier(attr.name)) propNames.push(attr.name.name);
+          else if (t.isJSXNamespacedName(attr.name)) {
+            propNames.push(`${attr.name.namespace.name}:${attr.name.name.name}`);
+          }
         }
       }
+      if (hasRest) propNames.push("…");
+
+      const hasKids = path.node.children.some(
+        (c) =>
+          t.isJSXElement(c) ||
+          t.isJSXFragment(c) ||
+          t.isJSXExpressionContainer(c) ||
+          (t.isJSXText(c) && c.value.trim().length > 0)
+      );
+
+      const rootId = jsxRootIdentifier(path.node.openingElement.name);
+      const refId =
+        rootId && rootId[0] === rootId[0]?.toUpperCase() ? nameToId.get(rootId) : undefined;
+
+      addNode({
+        id,
+        kind: "jsx",
+        label: `<${tag}>`,
+        params: propNames,
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: hasKids,
+        jsxTag: tag,
+        refId,
+        hasRestParam: hasRest || undefined,
+      });
+      if (refId) {
+        addEdge("ref", id, refId, "def", {
+          sourceHandle: "ref",
+          targetHandle: "ref",
+        });
+      }
+    },
+
+    JSXFragment(path) {
+      jsxSeq += 1;
+      const line = path.node.loc?.start.line ?? 0;
+      const col = path.node.loc?.start.column ?? 0;
+      const id = `fragment:L${line}:C${col}:${jsxSeq}`;
+      const outer = enclosingScopeId(path);
+      scopeIdByAst.set(path.node, id);
+      const hasKids = path.node.children.some(
+        (c) =>
+          t.isJSXElement(c) ||
+          t.isJSXFragment(c) ||
+          t.isJSXExpressionContainer(c) ||
+          (t.isJSXText(c) && c.value.trim().length > 0)
+      );
+      addNode({
+        id,
+        kind: "fragment",
+        label: "< >",
+        params: [],
+        loc: locOf(path.node),
+        scopeId: outer,
+        parentId: outer === MODULE_ID ? undefined : outer,
+        expandable: hasKids,
+      });
     },
   });
 
@@ -545,8 +1168,60 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     }
   }
   for (const n of nodes) {
-    if (n.kind === "binding" && n.scopeId) {
+    if (n.kind === "binding" && n.scopeId && !n.pattern && !n.slotOf) {
       bindingIds.set(`${n.scopeId}::${n.label}`, n.id);
+    }
+  }
+  // Slot bindings already registered; ensure map has them
+  for (const n of nodes) {
+    if (n.kind === "binding" && n.slotOf && n.scopeId) {
+      // label may be path; use last segment / name from id
+      const nameFromId = n.id.match(/^binding:([^:]+):/);
+      const bindName = nameFromId?.[1] ?? n.label.split(".").pop() ?? n.label;
+      bindingIds.set(`${n.scopeId}::${bindName}`, n.id);
+    }
+  }
+
+  // Deferred export rails + links (declaration exports + default)
+  const existingExportIds = new Set(nodes.filter((n) => n.kind === "export").map((n) => n.id));
+  for (const pe of pendingExports) {
+    if (pe.label === "default") {
+      const defaultId = `export:default:L${pe.line}`;
+      const target =
+        nameToId.get(pe.localName) ??
+        bindingIds.get(`${MODULE_ID}::${pe.localName}`);
+      if (target && existingExportIds.has(defaultId)) {
+        const already = edges.some(
+          (e) => e.kind === "returns" && e.source === target && e.target === defaultId
+        );
+        if (!already) {
+          addEdge("returns", target, defaultId, "default", {
+            sourceHandle: "out",
+            targetHandle: "in",
+          });
+        }
+      }
+      continue;
+    }
+    const id = `export:${pe.name}:L${pe.line}`;
+    if (!existingExportIds.has(id)) {
+      addNode({
+        id,
+        kind: "export",
+        label: pe.name,
+        params: [],
+        parentId: MODULE_ID,
+        scopeId: MODULE_ID,
+      });
+      existingExportIds.add(id);
+    }
+    const target =
+      nameToId.get(pe.localName) ?? bindingIds.get(`${MODULE_ID}::${pe.localName}`);
+    if (target) {
+      addEdge("returns", target, id, "export", {
+        sourceHandle: "out",
+        targetHandle: "in",
+      });
     }
   }
 
@@ -564,33 +1239,48 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     });
   }
 
+  // Re-link JSX refs now that nameToId is rebuilt
+  for (const n of nodes) {
+    if (n.kind !== "jsx" || !n.jsxTag) continue;
+    const root = n.jsxTag.split(".")[0]!;
+    if (root[0] !== root[0]?.toUpperCase()) continue;
+    const refId = nameToId.get(root);
+    if (!refId || n.refId === refId) continue;
+    n.refId = refId;
+    addEdge("ref", n.id, refId, "def", {
+      sourceHandle: "ref",
+      targetHandle: "ref",
+    });
+  }
+
   function resolveCallee(
     callee: t.Expression
-  ): { id?: string; label: string } | undefined {
+  ): { id?: string; label: string; optional?: boolean } | undefined {
     if (t.isIdentifier(callee)) {
       const known = nameToId.get(callee.name);
       if (known) return { id: known, label: callee.name };
-      // Free function name with no local binding — keep as external.
       return { id: ensureExternal(callee.name), label: callee.name };
     }
-    if (t.isMemberExpression(callee) && !callee.computed && t.isIdentifier(callee.property)) {
+    if (
+      (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)) &&
+      !callee.computed &&
+      t.isIdentifier(callee.property)
+    ) {
       const prop = callee.property.name;
-      // Member calls (name.trim, value.toUpperCase, this.say) are methods on a
-      // receiver — only link when we know that method in-graph; never invent globals.
+      const optional = t.isOptionalMemberExpression(callee) || Boolean(callee.optional);
       if (t.isIdentifier(callee.object)) {
         const q = `${callee.object.name}.${prop}`;
         const known = nameToId.get(q);
-        if (known) return { id: known, label: prop };
-        return { label: prop };
+        if (known) return { id: known, label: prop, optional };
+        return { label: prop, optional };
       }
       if (t.isThisExpression(callee.object)) {
         const known = nameToId.get(prop);
         const node = known ? nodes.find((n) => n.id === known) : undefined;
-        if (node?.kind === "method") return { id: known, label: prop };
-        return { label: prop };
+        if (node?.kind === "method") return { id: known, label: prop, optional };
+        return { label: prop, optional };
       }
-      // Nested receiver: name.trim().toUpperCase() — property only, no global.
-      return { label: prop };
+      return { label: prop, optional };
     }
     if (t.isNewExpression(callee as unknown as t.NewExpression)) {
       return undefined;
@@ -600,7 +1290,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
 
   function resolveCalleeFromNode(
     callee: t.Expression | t.V8IntrinsicIdentifier | t.Super
-  ): { id?: string; label: string } | undefined {
+  ): { id?: string; label: string; optional?: boolean } | undefined {
     if (!t.isExpression(callee)) return undefined;
     return resolveCallee(callee);
   }
@@ -635,7 +1325,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       }
       return;
     }
-    if (t.isCallExpression(object) || t.isNewExpression(object)) {
+    if (isCallLike(object) && !t.isImportExpression(object)) {
       const innerId = callIdByNode.get(object);
       if (innerId) {
         addEdge("thread", innerId, callId, "this", {
@@ -660,7 +1350,17 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       }
       return;
     }
-    if (t.isCallExpression(arg) || t.isNewExpression(arg)) {
+    if (isCallLike(arg) && !t.isImportExpression(arg)) {
+      const callId = callIdByNode.get(arg);
+      if (callId) {
+        addEdge("thread", callId, scopeId, "return", {
+          sourceHandle: "out",
+          targetHandle: "return",
+        });
+      }
+      return;
+    }
+    if (t.isImportExpression(arg)) {
       const callId = callIdByNode.get(arg);
       if (callId) {
         addEdge("thread", callId, scopeId, "return", {
@@ -750,196 +1450,327 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     return exprId;
   }
 
-  /** Feed a value expression into a binding/property `in` handle (like const init). */
+  function threadValueIntoHandle(
+    targetId: string,
+    arg: t.Expression | t.SpreadElement | t.ArgumentPlaceholder,
+    targetHandle: string,
+    scopeId: string,
+    edgeLabel?: string
+  ) {
+    const scopeNode = nodes.find((n) => n.id === scopeId);
+    const expr = t.isSpreadElement(arg) ? arg.argument : arg;
+    if (!t.isExpression(expr)) return;
+
+    if (t.isIdentifier(expr)) {
+      const bId =
+        bindingIds.get(`${scopeId}::${expr.name}`) ??
+        bindingIds.get(`${MODULE_ID}::${expr.name}`);
+      if (bId) {
+        addEdge("thread", bId, targetId, edgeLabel ?? expr.name, {
+          sourceHandle: "out",
+          targetHandle,
+        });
+        return;
+      }
+      const paramIndex = scopeNode?.params.indexOf(expr.name) ?? -1;
+      if (paramIndex >= 0 && scopeNode) {
+        addEdge("thread", scopeId, targetId, edgeLabel ?? expr.name, {
+          sourceHandle: `param:${paramIndex}`,
+          targetHandle,
+        });
+      }
+      return;
+    }
+
+    if (isCallLike(expr)) {
+      const innerId = callIdByNode.get(expr);
+      if (innerId) {
+        addEdge("thread", innerId, targetId, edgeLabel ?? "arg", {
+          sourceHandle: "out",
+          targetHandle,
+        });
+      }
+      return;
+    }
+
+    if (isInlineExpression(expr)) {
+      const exprId = ensureExpression(expr, scopeId);
+      if (exprId) {
+        addEdge("thread", exprId, targetId, edgeLabel ?? sourceSlice(expr, code), {
+          sourceHandle: "out",
+          targetHandle,
+        });
+      }
+    }
+  }
+
+  /** Feed a value expression into a call param handle. */
   function threadCallArgument(
     callId: string,
     arg: t.CallExpression["arguments"][number],
     argIndex: number,
     scopeId: string
   ) {
-    if (t.isSpreadElement(arg)) return;
-    const targetHandle = `param:${argIndex}`;
+    if (t.isSpreadElement(arg)) {
+      threadValueIntoHandle(callId, arg, "param:rest", scopeId, "…");
+      return;
+    }
+    threadValueIntoHandle(callId, arg, `param:${argIndex}`, scopeId);
+  }
+
+  /** Feed a value expression into a binding/property `in` handle (like const init). */
+  function threadIntoBinding(targetId: string, expr: t.Expression, scopeId: string) {
+    threadValueIntoHandle(targetId, expr, "in", scopeId, "assign");
+  }
+
+  function createCallNode(
+    path: NodePath<t.CallExpression | t.OptionalCallExpression>,
+    opts: { optional?: boolean } = {}
+  ) {
+    const scopeId = enclosingScopeId(path);
+    const calleeExpr = path.node.callee;
+    let memberCallee: t.MemberExpression | t.OptionalMemberExpression | undefined;
+    let methodName: string | undefined;
+    if (
+      (t.isMemberExpression(calleeExpr) || t.isOptionalMemberExpression(calleeExpr)) &&
+      !calleeExpr.computed &&
+      t.isIdentifier(calleeExpr.property)
+    ) {
+      memberCallee = calleeExpr;
+      methodName = calleeExpr.property.name;
+    }
+    const isMethod = memberCallee != null;
+
+    const resolved = resolveCalleeFromNode(
+      path.node.callee as t.Expression | t.V8IntrinsicIdentifier | t.Super
+    );
+    if (!resolved && !isMethod) return;
+    const callLabel = methodName ? `${methodName}()` : `${resolved!.label}()`;
+
+    callSeq += 1;
+    const line = path.node.loc?.start.line ?? 0;
+    const col = path.node.loc?.start.column ?? 0;
+    const callKey = methodName ?? resolved!.label;
+    const callId = `call:${callKey}:L${line}:C${col}:${callSeq}`;
+    callIdByNode.set(path.node, callId);
+
+    const calleeNode = resolved?.id ? nodes.find((n) => n.id === resolved.id) : undefined;
+    let callParams =
+      calleeNode && calleeNode.params.length > 0
+        ? [...calleeNode.params]
+        : path.node.arguments.map((_, i) => `arg${i}`);
+    if (calleeNode?.kind === "class") {
+      const ctor = nodes.find(
+        (n) =>
+          n.kind === "method" &&
+          n.parentId === calleeNode.id &&
+          n.memberKind === "constructor"
+      );
+      if (ctor) callParams = [...ctor.params];
+    }
+
+    const hasRest = path.node.arguments.some((a) => t.isSpreadElement(a));
+
+    let receiver: string | undefined;
+    if (memberCallee && t.isThisExpression(memberCallee.object)) {
+      receiver = "this";
+    } else if (memberCallee && t.isIdentifier(memberCallee.object)) {
+      receiver = memberCallee.object.name;
+    }
+
+    const optional =
+      opts.optional ||
+      t.isOptionalCallExpression(path.node) ||
+      resolved?.optional ||
+      (memberCallee && t.isOptionalMemberExpression(memberCallee)) ||
+      false;
+
+    addNode({
+      id: callId,
+      kind: "call",
+      label: callLabel,
+      params: callParams,
+      loc: locOf(path.node),
+      scopeId,
+      refId: resolved?.id,
+      parentId: scopeId === MODULE_ID ? undefined : scopeId,
+      receiver,
+      hasThis: Boolean(isMethod),
+      hasOptional: optional || undefined,
+      hasRestParam: hasRest || undefined,
+    });
+
+    if (resolved?.id) {
+      addEdge("ref", callId, resolved.id, "def", {
+        sourceHandle: "ref",
+        targetHandle: "ref",
+      });
+      const def = nodes.find((n) => n.id === resolved.id);
+      if (def?.kind === "import") {
+        addEdge("thread", resolved.id, callId, def.label, {
+          sourceHandle: "out",
+          targetHandle: "in",
+        });
+      }
+    }
+
     const scopeNode = nodes.find((n) => n.id === scopeId);
 
-    if (t.isIdentifier(arg)) {
+    if (memberCallee && t.isIdentifier(memberCallee.object)) {
+      threadIntoThis(callId, memberCallee.object, scopeId, scopeNode);
+    }
+
+    if (
+      path.parentPath?.isVariableDeclarator() &&
+      t.isIdentifier(path.parentPath.node.id)
+    ) {
+      const bName = path.parentPath.node.id.name;
       const bId =
-        bindingIds.get(`${scopeId}::${arg.name}`) ??
-        bindingIds.get(`${MODULE_ID}::${arg.name}`);
+        bindingIds.get(`${scopeId}::${bName}`) ??
+        bindingIds.get(`${MODULE_ID}::${bName}`);
       if (bId) {
-        addEdge("thread", bId, callId, arg.name, {
+        addEdge("thread", callId, bId, "assign", {
           sourceHandle: "out",
-          targetHandle,
-        });
-        return;
-      }
-      const paramIndex = scopeNode?.params.indexOf(arg.name) ?? -1;
-      if (paramIndex >= 0 && scopeNode) {
-        addEdge("thread", scopeId, callId, arg.name, {
-          sourceHandle: `param:${paramIndex}`,
-          targetHandle,
-        });
-      }
-      return;
-    }
-
-    if (t.isCallExpression(arg) || t.isNewExpression(arg)) {
-      const innerId = callIdByNode.get(arg);
-      if (innerId) {
-        addEdge("thread", innerId, callId, "arg", {
-          sourceHandle: "out",
-          targetHandle,
-        });
-      }
-      return;
-    }
-
-    if (t.isExpression(arg) && isInlineExpression(arg)) {
-      const exprId = ensureExpression(arg, scopeId);
-      if (exprId) {
-        addEdge("thread", exprId, callId, sourceSlice(arg, code), {
-          sourceHandle: "out",
-          targetHandle,
+          targetHandle: "in",
         });
       }
     }
   }
 
-  /** Feed a value expression into a binding/property `in` handle (like const init). */
-  function threadIntoBinding(targetId: string, expr: t.Expression, scopeId: string) {
-    const scopeNode = nodes.find((n) => n.id === scopeId);
-    if (t.isIdentifier(expr)) {
-      const src =
-        bindingIds.get(`${scopeId}::${expr.name}`) ??
-        bindingIds.get(`${MODULE_ID}::${expr.name}`);
-      if (src) {
-        addEdge("thread", src, targetId, "assign", {
-          sourceHandle: "out",
-          targetHandle: "in",
-        });
-        return;
-      }
-      const paramIndex = scopeNode?.params.indexOf(expr.name) ?? -1;
-      if (paramIndex >= 0 && scopeNode) {
-        addEdge("thread", scopeId, targetId, expr.name, {
-          sourceHandle: `param:${paramIndex}`,
-          targetHandle: "in",
-        });
-      }
-      return;
-    }
-    if (t.isCallExpression(expr) || t.isNewExpression(expr)) {
-      const callId = callIdByNode.get(expr);
-      if (callId) {
-        addEdge("thread", callId, targetId, "assign", {
-          sourceHandle: "out",
-          targetHandle: "in",
-        });
-      }
-      return;
-    }
-    if (isInlineExpression(expr)) {
-      const exprId = ensureExpression(expr, scopeId);
-      if (exprId) {
-        addEdge("thread", exprId, targetId, "assign", {
-          sourceHandle: "out",
-          targetHandle: "in",
-        });
-      }
-    }
+  function finishCallArgs(
+    path: NodePath<t.CallExpression | t.OptionalCallExpression | t.NewExpression>
+  ) {
+    const callId = callIdByNode.get(path.node);
+    if (!callId) return;
+    const scopeId = enclosingScopeId(path);
+    path.node.arguments.forEach((arg, argIndex) => {
+      threadCallArgument(callId, arg, argIndex, scopeId);
+    });
   }
 
   traverse(ast, {
     CallExpression: {
       enter(path) {
+        // Dynamic import(): CallExpression with Import callee (babel classic shape)
+        if (t.isImport(path.node.callee)) {
+          const scopeId = enclosingScopeId(path);
+          callSeq += 1;
+          const line = path.node.loc?.start.line ?? 0;
+          const col = path.node.loc?.start.column ?? 0;
+          const callId = `call:import:L${line}:C${col}:${callSeq}`;
+          callIdByNode.set(path.node, callId);
+
+          let importSource: string | undefined;
+          const src = path.node.arguments[0];
+          if (src && t.isStringLiteral(src)) importSource = src.value;
+
+          addNode({
+            id: callId,
+            kind: "call",
+            label: "import()",
+            params: ["source"],
+            loc: locOf(path.node),
+            scopeId,
+            parentId: scopeId === MODULE_ID ? undefined : scopeId,
+            importSource,
+          });
+
+          if (
+            path.parentPath?.isVariableDeclarator() &&
+            t.isIdentifier(path.parentPath.node.id)
+          ) {
+            const bName = path.parentPath.node.id.name;
+            const bId =
+              bindingIds.get(`${scopeId}::${bName}`) ??
+              bindingIds.get(`${MODULE_ID}::${bName}`);
+            if (bId) {
+              addEdge("thread", callId, bId, "assign", {
+                sourceHandle: "out",
+                targetHandle: "in",
+              });
+            }
+          }
+          return;
+        }
+        createCallNode(path);
+      },
+      exit(path) {
+        if (t.isImport(path.node.callee)) {
+          const callId = callIdByNode.get(path.node);
+          if (!callId) return;
+          const scopeId = enclosingScopeId(path);
+          const src = path.node.arguments[0];
+          if (src) threadValueIntoHandle(callId, src, "param:0", scopeId, "source");
+          return;
+        }
+        finishCallArgs(path);
+        const callId = callIdByNode.get(path.node);
+        if (!callId) return;
         const scopeId = enclosingScopeId(path);
         const calleeExpr = path.node.callee;
-        let memberCallee: t.MemberExpression | undefined;
-        let methodName: string | undefined;
         if (
-          t.isMemberExpression(calleeExpr) &&
-          !calleeExpr.computed &&
-          t.isIdentifier(calleeExpr.property)
+          !t.isExpression(calleeExpr) ||
+          !(t.isMemberExpression(calleeExpr) || t.isOptionalMemberExpression(calleeExpr)) ||
+          calleeExpr.computed ||
+          !t.isExpression(calleeExpr.object)
         ) {
-          memberCallee = calleeExpr;
-          methodName = calleeExpr.property.name;
+          return;
         }
-        const isMethod = memberCallee != null;
+        if (isCallLike(calleeExpr.object) && !t.isImportExpression(calleeExpr.object)) {
+          const scopeNode = nodes.find((n) => n.id === scopeId);
+          threadIntoThis(callId, calleeExpr.object, scopeId, scopeNode);
+        }
+      },
+    },
 
-        const resolved = resolveCalleeFromNode(path.node.callee);
-        // Member calls still get a block even with no in-graph definition.
-        if (!resolved && !isMethod) return;
-        const callLabel = methodName
-          ? `${methodName}()`
-          : `${resolved!.label}()`;
+    OptionalCallExpression: {
+      enter(path) {
+        createCallNode(path, { optional: true });
+      },
+      exit(path) {
+        finishCallArgs(path);
+        const callId = callIdByNode.get(path.node);
+        if (!callId) return;
+        const scopeId = enclosingScopeId(path);
+        const calleeExpr = path.node.callee;
+        if (
+          !(t.isMemberExpression(calleeExpr) || t.isOptionalMemberExpression(calleeExpr)) ||
+          calleeExpr.computed ||
+          !t.isExpression(calleeExpr.object)
+        ) {
+          return;
+        }
+        if (isCallLike(calleeExpr.object) && !t.isImportExpression(calleeExpr.object)) {
+          const scopeNode = nodes.find((n) => n.id === scopeId);
+          threadIntoThis(callId, calleeExpr.object, scopeId, scopeNode);
+        }
+      },
+    },
 
+    ImportExpression: {
+      enter(path) {
+        const scopeId = enclosingScopeId(path);
         callSeq += 1;
         const line = path.node.loc?.start.line ?? 0;
         const col = path.node.loc?.start.column ?? 0;
-        const callKey = methodName ?? resolved!.label;
-        const callId = `call:${callKey}:L${line}:C${col}:${callSeq}`;
+        const callId = `call:import:L${line}:C${col}:${callSeq}`;
         callIdByNode.set(path.node, callId);
 
-        const calleeNode = resolved?.id
-          ? nodes.find((n) => n.id === resolved.id)
-          : undefined;
-        let callParams =
-          calleeNode && calleeNode.params.length > 0
-            ? [...calleeNode.params]
-            : path.node.arguments.map((_, i) => `arg${i}`);
-        // Constructor via class id → use constructor method params
-        if (calleeNode?.kind === "class") {
-          const ctor = nodes.find(
-            (n) =>
-              n.kind === "method" &&
-              n.parentId === calleeNode.id &&
-              n.memberKind === "constructor"
-          );
-          if (ctor) callParams = [...ctor.params];
-        }
-
-        let receiver: string | undefined;
-        if (memberCallee && t.isThisExpression(memberCallee.object)) {
-          receiver = "this";
-        } else if (memberCallee && t.isIdentifier(memberCallee.object)) {
-          receiver = memberCallee.object.name;
-        }
+        let importSource: string | undefined;
+        const src = path.node.source;
+        if (t.isStringLiteral(src)) importSource = src.value;
 
         addNode({
           id: callId,
           kind: "call",
-          label: callLabel,
-          params: callParams,
+          label: "import()",
+          params: ["source"],
           loc: locOf(path.node),
           scopeId,
-          refId: resolved?.id,
           parentId: scopeId === MODULE_ID ? undefined : scopeId,
-          receiver,
-          hasThis: Boolean(isMethod),
+          importSource,
         });
 
-        // Call top → declaration bottom (only when we know the definition)
-        if (resolved?.id) {
-          addEdge("ref", callId, resolved.id, "def", {
-            sourceHandle: "ref",
-            targetHandle: "ref",
-          });
-          const def = nodes.find((n) => n.id === resolved.id);
-          if (def?.kind === "import") {
-            addEdge("thread", resolved.id, callId, def.label, {
-              sourceHandle: "out",
-              targetHandle: "in",
-            });
-          }
-        }
-
-        const scopeNode = nodes.find((n) => n.id === scopeId);
-
-        // Identifier receivers can wire immediately; call-chain this waits for exit
-        if (memberCallee && t.isIdentifier(memberCallee.object)) {
-          threadIntoThis(callId, memberCallee.object, scopeId, scopeNode);
-        }
-
-        // const x = fn() → call output → binding
         if (
           path.parentPath?.isVariableDeclarator() &&
           t.isIdentifier(path.parentPath.node.id)
@@ -960,26 +1791,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         const callId = callIdByNode.get(path.node);
         if (!callId) return;
         const scopeId = enclosingScopeId(path);
-        path.node.arguments.forEach((arg, argIndex) => {
-          threadCallArgument(callId, arg, argIndex, scopeId);
-        });
-        const calleeExpr = path.node.callee;
-        if (
-          !t.isExpression(calleeExpr) ||
-          !t.isMemberExpression(calleeExpr) ||
-          calleeExpr.computed ||
-          !t.isExpression(calleeExpr.object)
-        ) {
-          return;
-        }
-        // Nested call/new as receiver — available after children visited
-        if (
-          t.isCallExpression(calleeExpr.object) ||
-          t.isNewExpression(calleeExpr.object)
-        ) {
-          const scopeNode = nodes.find((n) => n.id === scopeId);
-          threadIntoThis(callId, calleeExpr.object, scopeId, scopeNode);
-        }
+        threadValueIntoHandle(callId, path.node.source, "param:0", scopeId, "source");
       },
     },
 
@@ -1021,6 +1833,8 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           if (ctor) callParams = [...ctor.params];
         }
 
+        const hasRest = path.node.arguments.some((a) => t.isSpreadElement(a));
+
         addNode({
           id: callId,
           kind: "call",
@@ -1030,6 +1844,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           scopeId,
           refId: resolved.id,
           parentId: scopeId === MODULE_ID ? undefined : scopeId,
+          hasRestParam: hasRest || undefined,
         });
         if (resolved.id) {
           addEdge("ref", callId, resolved.id, "def", {
@@ -1055,29 +1870,37 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         }
       },
       exit(path) {
-        const callId = callIdByNode.get(path.node);
-        if (!callId) return;
-        const scopeId = enclosingScopeId(path);
-        path.node.arguments.forEach((arg, argIndex) => {
-          threadCallArgument(callId, arg, argIndex, scopeId);
-        });
+        finishCallArgs(path);
       },
     },
 
     VariableDeclarator: {
       exit(path) {
-        if (!t.isIdentifier(path.node.id) || !path.node.init) return;
+        if (!path.node.init) return;
         if (
           t.isFunctionExpression(path.node.init) ||
           t.isArrowFunctionExpression(path.node.init)
         ) {
           return;
         }
-        if (t.isCallExpression(path.node.init) || t.isNewExpression(path.node.init)) return;
+        if (isCallLike(path.node.init)) return;
         const scopeId = path.parentPath ? enclosingScopeId(path.parentPath) : MODULE_ID;
-        const bId = bindingIds.get(`${scopeId}::${path.node.id.name}`);
-        if (!bId) return;
-        threadIntoBinding(bId, path.node.init, scopeId);
+
+        if (t.isIdentifier(path.node.id)) {
+          const bId = bindingIds.get(`${scopeId}::${path.node.id.name}`);
+          if (!bId) return;
+          threadIntoBinding(bId, path.node.init, scopeId);
+          return;
+        }
+
+        if (t.isObjectPattern(path.node.id) || t.isArrayPattern(path.node.id)) {
+          const line = path.node.loc?.start.line ?? 0;
+          const col = path.node.loc?.start.column ?? 0;
+          const parentId = `binding:pattern:L${line}:C${col}`;
+          if (nodes.some((n) => n.id === parentId)) {
+            threadIntoBinding(parentId, path.node.init, scopeId);
+          }
+        }
       },
     },
 
@@ -1091,6 +1914,12 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         const scopeId = enclosingScopeId(path);
         const left = path.node.left;
         const right = path.node.right;
+
+        if (t.isOptionalMemberExpression(left)) {
+          // Exotic optional assignment — skip dedicated prop slot
+          ensureExpression(path.node, scopeId);
+          return;
+        }
 
         if (
           t.isMemberExpression(left) &&
@@ -1106,7 +1935,6 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           } else if (t.isIdentifier(left.object)) {
             receiver = left.object.name;
           } else {
-            // Complex LHS — keep as a single expression block.
             ensureExpression(path.node, scopeId);
             return;
           }
@@ -1131,7 +1959,6 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           return;
         }
 
-        // Plain identifier reassignment: feed existing binding if we know it.
         if (t.isIdentifier(left)) {
           const bId =
             bindingIds.get(`${scopeId}::${left.name}`) ??
@@ -1149,7 +1976,17 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     ReturnStatement: {
       exit(path) {
         const scopeId = enclosingScopeId(path);
-        threadReturnValue(scopeId, path.node.argument ?? undefined);
+        // Prefer function scope for returns, not branch/jsx
+        const fnScope = path.findParent(
+          (p) =>
+            p.isFunctionDeclaration() ||
+            p.isFunctionExpression() ||
+            p.isArrowFunctionExpression() ||
+            p.isClassMethod() ||
+            p.isClassPrivateMethod()
+        );
+        const retScope = fnScope ? functionScopeId(fnScope) ?? scopeId : scopeId;
+        threadReturnValue(retScope, path.node.argument ?? undefined);
       },
     },
 
@@ -1174,7 +2011,87 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         threadReturnValue(scopeId, path.node.body);
       },
     },
+
+    JSXElement: {
+      exit(path) {
+        const jsxId = scopeIdByAst.get(path.node);
+        if (!jsxId) return;
+        const scopeId = enclosingScopeId(path);
+
+        for (const attr of path.node.openingElement.attributes) {
+          if (t.isJSXSpreadAttribute(attr)) {
+            if (t.isExpression(attr.argument)) {
+              threadValueIntoHandle(jsxId, attr.argument, "param:rest", scopeId, "…");
+            }
+            continue;
+          }
+          if (!t.isJSXAttribute(attr) || !attr.value) continue;
+          let propName = "?";
+          if (t.isJSXIdentifier(attr.name)) propName = attr.name.name;
+          const paramIndex = nodes.find((n) => n.id === jsxId)?.params.indexOf(propName) ?? -1;
+          const handle = paramIndex >= 0 ? `param:${paramIndex}` : `param:${propName}`;
+
+          if (t.isStringLiteral(attr.value)) {
+            const lit = attr.value;
+            // Treat as inline literal expression
+            const exprId = ensureExpression(lit as unknown as t.Expression, scopeId);
+            if (exprId) {
+              addEdge("thread", exprId, jsxId, propName, {
+                sourceHandle: "out",
+                targetHandle: handle,
+              });
+            }
+          } else if (t.isJSXExpressionContainer(attr.value)) {
+            const ex = attr.value.expression;
+            if (t.isExpression(ex)) {
+              threadValueIntoHandle(jsxId, ex, handle, scopeId, propName);
+            }
+          }
+        }
+
+        for (const child of path.node.children) {
+          if (t.isJSXExpressionContainer(child) && t.isExpression(child.expression)) {
+            const ex = child.expression;
+            if (isCallLike(ex) || isInlineExpression(ex) || t.isIdentifier(ex)) {
+              // Ensure nested expressions/calls exist; they use jsx as scope via enclosingScopeId
+              if (isInlineExpression(ex) && !isCallLike(ex)) {
+                ensureExpression(ex, jsxId);
+              }
+            }
+          }
+        }
+      },
+    },
+
+    ThrowStatement: {
+      exit(path) {
+        const line = path.node.loc?.start.line ?? 0;
+        const throwNode = nodes.find(
+          (n) => n.kind === "throw" && n.loc?.startLine === line && n.id.includes(`L${line}`)
+        );
+        if (!throwNode || !path.node.argument) return;
+        const scopeId = throwNode.scopeId ?? enclosingScopeId(path);
+        if (t.isExpression(path.node.argument)) {
+          threadValueIntoHandle(throwNode.id, path.node.argument, "in", scopeId, "throw");
+        }
+      },
+    },
   });
+
+  // Thread deferred class field inits
+  for (const { propId, init, scopeId } of pendingFieldInits) {
+    if (isCallLike(init)) {
+      const callId = callIdByNode.get(init);
+      if (callId) {
+        addEdge("thread", callId, propId, "assign", {
+          sourceHandle: "out",
+          targetHandle: "in",
+        });
+      }
+    } else {
+      threadIntoBinding(propId, init, scopeId);
+    }
+  }
 
   // Worker-flow: sequential processing order within each scope (and class method stacks).
   function chainFlow(ordered: GraphNode[]) {
@@ -1195,6 +2112,17 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     if (n.kind === "import" || n.kind === "export") continue;
     // Class methods get their own chain below (stack order), not module body order.
     if (n.kind === "method" && n.parentId?.startsWith("class:")) continue;
+    // Class fields stack with methods
+    if (
+      n.kind === "binding" &&
+      n.bindingKind === "prop" &&
+      n.parentId?.startsWith("class:") &&
+      n.scopeId === n.parentId
+    ) {
+      continue;
+    }
+    // Destructuring slots follow parent pattern in layout — skip from sibling flow
+    if (n.kind === "binding" && n.slotOf) continue;
     const scope = n.scopeId ?? MODULE_ID;
     const list = byScope.get(scope) ?? [];
     list.push(n);
@@ -1206,7 +2134,6 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     const hasWell = !!scopeNode?.expandable;
 
     if (hasWell && ordered.length > 0) {
-      // Inner window: well entry → members → well exit
       addEdge("flow", scope, ordered[0]!.id, "flow", {
         sourceHandle: "flow-well-in",
         targetHandle: "flow-in",
@@ -1223,10 +2150,13 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
 
   const methodsByClass = new Map<string, GraphNode[]>();
   for (const n of nodes) {
-    if (n.kind !== "method" || !n.parentId?.startsWith("class:")) continue;
-    const list = methodsByClass.get(n.parentId) ?? [];
-    list.push(n);
-    methodsByClass.set(n.parentId, list);
+    if (n.parentId?.startsWith("class:") && n.scopeId === n.parentId) {
+      if (n.kind === "method" || (n.kind === "binding" && n.bindingKind === "prop")) {
+        const list = methodsByClass.get(n.parentId) ?? [];
+        list.push(n);
+        methodsByClass.set(n.parentId, list);
+      }
+    }
   }
   for (const [classId, list] of methodsByClass) {
     const ordered = [...list].sort(

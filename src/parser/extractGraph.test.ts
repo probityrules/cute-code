@@ -602,4 +602,226 @@ describe("extractGraph", () => {
     if (result.ok) return;
     assert.ok(result.error.message.length > 0);
   });
+
+  it("creates export rails for export function / class / const", () => {
+    const code = `
+      export function Foo() {}
+      export class Bar {}
+      export const x = 1, y = 2;
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const foo = result.graph.nodes.find((n) => n.kind === "function" && n.label === "Foo");
+    const bar = result.graph.nodes.find((n) => n.kind === "class" && n.label === "Bar");
+    const expFoo = result.graph.nodes.find((n) => n.kind === "export" && n.label === "Foo");
+    const expBar = result.graph.nodes.find((n) => n.kind === "export" && n.label === "Bar");
+    const expX = result.graph.nodes.find((n) => n.kind === "export" && n.label === "x");
+    const expY = result.graph.nodes.find((n) => n.kind === "export" && n.label === "y");
+    assert.ok(foo && bar && expFoo && expBar && expX && expY);
+    assert.ok(
+      result.graph.edges.some(
+        (e) => e.kind === "returns" && e.source === foo?.id && e.target === expFoo?.id
+      )
+    );
+    assert.ok(
+      result.graph.edges.some(
+        (e) => e.kind === "returns" && e.source === bar?.id && e.target === expBar?.id
+      )
+    );
+  });
+
+  it("creates destructuring parent binding with child slots", () => {
+    const code = `
+      function main(user) {
+        const { a, b } = user;
+        const [x, y] = a;
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const patterns = result.graph.nodes.filter((n) => n.kind === "binding" && n.pattern);
+    assert.ok(patterns.length >= 2);
+    const obj = patterns.find((n) => n.label.includes("a"));
+    assert.ok(obj);
+    assert.deepEqual(obj?.params, ["a", "b"]);
+    const slots = result.graph.nodes.filter((n) => n.slotOf === obj?.id);
+    assert.equal(slots.length, 2);
+    assert.ok(slots.every((s) => s.kind === "binding"));
+    const fromUser = result.graph.edges.find(
+      (e) =>
+        e.kind === "thread" &&
+        e.target === obj?.id &&
+        e.targetHandle === "in"
+    );
+    assert.ok(fromUser);
+  });
+
+  it("extracts class fields as prop bindings", () => {
+    const code = `
+      class Counter {
+        count = 0;
+        static shared = 1;
+        #secret = 2;
+        bump() {}
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const cls = result.graph.nodes.find((n) => n.kind === "class" && n.label === "Counter");
+    const count = result.graph.nodes.find(
+      (n) => n.kind === "binding" && n.label === "count" && n.scopeId === cls?.id
+    );
+    const shared = result.graph.nodes.find(
+      (n) => n.kind === "binding" && n.label === "shared" && n.static
+    );
+    const secret = result.graph.nodes.find(
+      (n) => n.kind === "binding" && n.label === "#secret"
+    );
+    assert.ok(count && shared && secret);
+    assert.equal(count?.bindingKind, "prop");
+    assert.equal(count?.parentId, cls?.id);
+  });
+
+  it("marks optional calls with hasOptional", () => {
+    const code = `
+      function main(api) {
+        api?.fetch();
+        maybe?.();
+      }
+      function maybe() {}
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const fetchCall = result.graph.nodes.find((n) => n.kind === "call" && n.label === "fetch()");
+    const maybeCall = result.graph.nodes.find((n) => n.kind === "call" && n.label === "maybe()");
+    assert.ok(fetchCall);
+    assert.equal(fetchCall?.hasOptional, true);
+    assert.ok(maybeCall);
+    assert.equal(maybeCall?.hasOptional, true);
+  });
+
+  it("threads spread args into param:rest and sets hasRestParam", () => {
+    const code = `
+      function greet(a, b) {}
+      function main(items) {
+        greet(...items);
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const call = result.graph.nodes.find((n) => n.kind === "call" && n.label === "greet()");
+    assert.ok(call);
+    assert.equal(call?.hasRestParam, true);
+    const rest = result.graph.edges.find(
+      (e) =>
+        e.kind === "thread" &&
+        e.target === call?.id &&
+        e.targetHandle === "param:rest"
+    );
+    assert.ok(rest);
+  });
+
+  it("builds expression blocks for await and marks async functions", () => {
+    const code = `
+      async function load(url) {
+        return await fetch(url);
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const load = result.graph.nodes.find((n) => n.kind === "function" && n.label === "load");
+    assert.equal(load?.async, true);
+    const awaitExpr = result.graph.nodes.find(
+      (n) => n.kind === "expression" && n.label.includes("await")
+    );
+    assert.ok(awaitExpr);
+    const ret = result.graph.edges.find(
+      (e) =>
+        e.kind === "thread" &&
+        e.source === awaitExpr?.id &&
+        e.target === load?.id &&
+        e.targetHandle === "return"
+    );
+    assert.ok(ret);
+  });
+
+  it("creates expandable if branch nodes scoping body bindings", () => {
+    const code = `
+      function main(flag) {
+        if (flag) {
+          const x = 1;
+        } else {
+          const y = 2;
+        }
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const branch = result.graph.nodes.find((n) => n.kind === "branch" && n.branchKind === "if");
+    assert.ok(branch);
+    assert.equal(branch?.expandable, true);
+    const x = result.graph.nodes.find((n) => n.kind === "binding" && n.label === "x");
+    const y = result.graph.nodes.find((n) => n.kind === "binding" && n.label === "y");
+    assert.equal(x?.scopeId, branch?.id);
+    assert.equal(y?.scopeId, branch?.id);
+  });
+
+  it("extracts JSX elements with tag and prop params", () => {
+    const code = `
+      function Box(props) { return null; }
+      function App() {
+        return <Box title="hi">{1 + 1}</Box>;
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const jsx = result.graph.nodes.find((n) => n.kind === "jsx");
+    assert.ok(jsx);
+    assert.equal(jsx?.jsxTag, "Box");
+    assert.ok(jsx?.params.includes("title"));
+    const box = result.graph.nodes.find((n) => n.kind === "function" && n.label === "Box");
+    assert.equal(jsx?.refId, box?.id);
+  });
+
+  it("extracts dynamic import() as call with importSource", () => {
+    const code = `
+      async function load() {
+        const mod = await import("./mod.js");
+        return mod;
+      }
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const imp = result.graph.nodes.find((n) => n.kind === "call" && n.label === "import()");
+    assert.ok(imp);
+    assert.equal(imp?.importSource, "./mod.js");
+  });
+
+  it("extracts export * and side-effect imports", () => {
+    const code = `
+      import "./side.js";
+      export * from "./lib.js";
+    `;
+    const result = extractGraph(code);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const side = result.graph.nodes.find(
+      (n) => n.kind === "import" && n.importSource === "./side.js"
+    );
+    assert.ok(side);
+    const star = result.graph.nodes.find(
+      (n) => n.kind === "export" && n.importSource === "./lib.js"
+    );
+    assert.ok(star);
+    assert.match(star!.label, /\*/);
+  });
 });

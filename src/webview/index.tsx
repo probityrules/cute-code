@@ -135,6 +135,10 @@ function KindTitle({
   memberKind,
   bindingKind,
   receiver,
+  async: isAsync,
+  generator,
+  isStatic,
+  hasOptional,
 }: {
   kind: NodeKind;
   label: string;
@@ -142,12 +146,22 @@ function KindTitle({
   bindingKind?: BindingKind;
   /** When `"this"`, show a small this glyph before the title. */
   receiver?: string;
+  async?: boolean;
+  generator?: boolean;
+  isStatic?: boolean;
+  hasOptional?: boolean;
 }) {
   return (
     <div className="struct-title-row">
       <KindIcon kind={kind} memberKind={memberKind} bindingKind={bindingKind} />
       {receiver === "this" && <IconThis />}
-      <div className="struct-label">{label}</div>
+      <div className="struct-label">
+        {label}
+        {hasOptional && <span className="struct-optional-mark">?</span>}
+      </div>
+      {isStatic && <span className="struct-badge">static</span>}
+      {isAsync && <span className="struct-badge">async</span>}
+      {generator && <span className="struct-badge">*</span>}
     </div>
   );
 }
@@ -199,6 +213,12 @@ const KIND_CLASS: Record<NodeKind, string> = {
   binding: "kind-binding",
   call: "kind-call",
   expression: "kind-expression",
+  branch: "kind-branch",
+  loop: "kind-loop",
+  try: "kind-try",
+  throw: "kind-throw",
+  jsx: "kind-jsx",
+  fragment: "kind-fragment",
 };
 
 export const STACK_W = 200;
@@ -259,6 +279,16 @@ type NodeData = {
   /** Expanded well entry/exit step numbers. */
   flowWellInStep?: number;
   flowWellOutStep?: number;
+  hasOptional?: boolean;
+  async?: boolean;
+  generator?: boolean;
+  static?: boolean;
+  pattern?: boolean;
+  slotOf?: string;
+  branchKind?: "if" | "switch";
+  loopKind?: "for" | "for-of" | "for-in" | "while" | "do";
+  jsxTag?: string;
+  hasRestParam?: boolean;
 };
 
 function stackHeight(memberCount: number): number {
@@ -285,11 +315,14 @@ function wellParamTop(index: number, count: number, frameHeight: number): number
 function CallParamHandles({
   params,
   visible = true,
+  hasRest = false,
 }: {
   params: string[];
   visible?: boolean;
+  hasRest?: boolean;
 }) {
-  if (!params.length) return null;
+  const count = params.length + (hasRest ? 1 : 0);
+  if (!count) return null;
   return (
     <>
       {params.map((name, i) => (
@@ -299,10 +332,20 @@ function CallParamHandles({
           position={Position.Left}
           id={`param:${i}`}
           className={handleCls(visible, "handle-param")}
-          style={{ top: handleTop(i, params.length) }}
+          style={{ top: handleTop(i, count) }}
           title={name}
         />
       ))}
+      {hasRest && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="param:rest"
+          className={handleCls(visible, "handle-param")}
+          style={{ top: handleTop(params.length, count) }}
+          title="…"
+        />
+      )}
     </>
   );
 }
@@ -433,11 +476,19 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
   const paramMode = useEdgeMode("param");
   const expanded = d.expanded;
   const isFn = d.kind === "function" || d.kind === "arrow";
+  const isJsx = d.kind === "jsx" || d.kind === "fragment";
   const isImport = d.kind === "import";
   const nodeId = d.nodeId ?? id;
   const frameHeight = d.frameHeight ?? 0;
   const paramVisible = paramMode === "lines" || threadMode === "lines";
-  const mountParams = d.params.length > 0 && (show("param") || threadMode !== "hidden");
+  const mountWellParams =
+    isFn &&
+    d.params.length > 0 &&
+    (show("param") || threadMode !== "hidden");
+  const mountCallParams =
+    isJsx &&
+    (d.params.length > 0 || d.hasRestParam) &&
+    (show("param") || threadMode !== "hidden");
   const inVisible = threadMode === "lines" || callsMode === "lines";
   const outVisible = threadMode === "lines" || returnsMode === "lines";
 
@@ -463,11 +514,18 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
           <IconOpenFile />
         </NodeCornerAction>
       )}
-      {isFn && expanded && mountParams && (
+      {isFn && expanded && mountWellParams && (
         <WellParamHandles
           params={d.params}
           frameHeight={frameHeight}
           visible={paramVisible}
+        />
+      )}
+      {mountCallParams && (
+        <CallParamHandles
+          params={d.params.filter((p) => p !== "…")}
+          visible={paramVisible}
+          hasRest={!!d.hasRestParam}
         />
       )}
       {isFn && expanded && threadMode !== "hidden" && (
@@ -484,7 +542,7 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
           }}
         />
       )}
-      {!isFn && !isImport && (
+      {!isFn && !isImport && !isJsx && (
         <Handle
           type="target"
           position={Position.Left}
@@ -492,7 +550,7 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
           id="in"
         />
       )}
-      {!isFn && !isImport && threadMode === "labels" && (
+      {!isFn && !isImport && !isJsx && threadMode === "labels" && (
         <PortLabel
           text={portName(d, "in", "in")}
           className="port-label-in"
@@ -521,9 +579,26 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
           id="ref"
         />
       )}
+      {isJsx && (
+        <Handle
+          type="source"
+          position={Position.Top}
+          className={handleCls(refMode === "lines", "handle-ref")}
+          id="ref"
+        />
+      )}
       <div className="decl-header">
-        <KindTitle kind={d.kind} label={d.label} />
-        {!expanded && d.params.length > 0 && (
+        <KindTitle
+          kind={d.kind}
+          label={d.label}
+          async={d.async}
+          generator={d.generator}
+        />
+        {d.branchKind && (
+          <div className="struct-returns">{d.branchKind}</div>
+        )}
+        {d.loopKind && <div className="struct-returns">{d.loopKind}</div>}
+        {!expanded && d.params.length > 0 && !isJsx && (
           <div className="struct-params">
             {d.params.map((p, i) => (
               <span key={i} className="param-chip">
@@ -539,7 +614,8 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
       {expanded && (
         <div className="expand-well" aria-hidden={false}>
           <WellFlowHandles inStep={d.flowWellInStep} outStep={d.flowWellOutStep} />
-          {paramVisible &&
+          {mountWellParams &&
+            paramVisible &&
             d.params.map((name, i) => (
               <span
                 key={i}
@@ -721,7 +797,14 @@ function MethodBlockView({ data, selected, id }: NodeProps) {
         id="ref"
       />
       <div className="decl-header">
-        <KindTitle kind="method" label={d.label} memberKind={d.memberKind} />
+        <KindTitle
+          kind="method"
+          label={d.label}
+          memberKind={d.memberKind}
+          async={d.async}
+          generator={d.generator}
+          isStatic={d.static}
+        />
         {!expanded && d.params.length > 0 && (
           <div className="struct-params">
             {d.params.map((p, i) => (
@@ -766,7 +849,7 @@ function BindingNodeView({ data, selected }: NodeProps) {
   const threadLines = threadMode === "lines";
   return (
     <div
-      className={`struct-node kind-binding ${isProp ? "kind-prop" : ""} ${selected ? "selected" : ""} ${d.hasThis ? "has-this" : ""}`}
+      className={`struct-node kind-binding ${isProp ? "kind-prop" : ""} ${d.pattern ? "kind-pattern" : ""} ${d.slotOf ? "kind-slot" : ""} ${selected ? "selected" : ""} ${d.hasThis ? "has-this" : ""}`}
     >
       <FlowHandles step={d.flowStep} />
       <Handle
@@ -788,7 +871,17 @@ function BindingNodeView({ data, selected }: NodeProps) {
         label={d.label}
         bindingKind={d.bindingKind}
         receiver={d.receiver}
+        isStatic={d.static}
       />
+      {d.pattern && d.params.length > 0 && (
+        <div className="struct-params">
+          {d.params.map((p, i) => (
+            <span key={i} className="param-chip">
+              {p}
+            </span>
+          ))}
+        </div>
+      )}
       <Handle
         type="source"
         position={Position.Bottom}
@@ -890,6 +983,9 @@ function ExportRailView({ data, selected }: NodeProps) {
         title="outside module"
       />
       <KindTitle kind="export" label={d.label} />
+      {d.importSource && (
+        <div className="struct-returns rail-meta">from {d.importSource}</div>
+      )}
     </div>
   );
 }
@@ -900,9 +996,11 @@ function CallNodeView({ data, selected }: NodeProps) {
   const threadMode = useEdgeMode("thread");
   const refMode = useEdgeMode("ref");
   const paramMode = useEdgeMode("param");
-  const leftCount = d.params.length;
+  const leftCount = d.params.length + (d.hasRestParam ? 1 : 0);
   const paramVisible = paramMode === "lines" || threadMode === "lines";
-  const mountParams = d.params.length > 0 && (show("param") || threadMode !== "hidden");
+  const mountParams =
+    (d.params.length > 0 || d.hasRestParam) &&
+    (show("param") || threadMode !== "hidden");
   const threadLines = threadMode === "lines";
   return (
     <div
@@ -936,16 +1034,29 @@ function CallNodeView({ data, selected }: NodeProps) {
           style={{ left: -4, top: "50%" }}
         />
       )}
-      {mountParams && <CallParamHandles params={d.params} visible={paramVisible} />}
+      {mountParams && (
+        <CallParamHandles
+          params={d.params}
+          visible={paramVisible}
+          hasRest={!!d.hasRestParam}
+        />
+      )}
       {threadMode === "labels" &&
         d.params.map((name, i) => (
           <PortLabel
             key={`pl:${i}`}
             text={portName(d, `param:${i}`, name)}
             className="port-label-param"
-            style={{ left: -4, top: handleTop(i, d.params.length) }}
+            style={{ left: -4, top: handleTop(i, leftCount) }}
           />
         ))}
+      {threadMode === "labels" && d.hasRestParam && (
+        <PortLabel
+          text={portName(d, "param:rest", "…")}
+          className="port-label-param"
+          style={{ left: -4, top: handleTop(d.params.length, leftCount) }}
+        />
+      )}
       <Handle
         type="source"
         position={Position.Right}
@@ -967,7 +1078,15 @@ function CallNodeView({ data, selected }: NodeProps) {
         id="ref"
         style={d.hasThis ? { left: "72%" } : undefined}
       />
-      <KindTitle kind="call" label={d.label} receiver={d.receiver} />
+      <KindTitle
+        kind="call"
+        label={d.label}
+        receiver={d.receiver}
+        hasOptional={d.hasOptional}
+      />
+      {d.importSource && (
+        <div className="struct-returns rail-meta">{d.importSource}</div>
+      )}
       {refMode === "labels" && d.refCaption && (
         <div className="struct-ref-caption">{d.refCaption}</div>
       )}
@@ -1061,7 +1180,11 @@ function graphToNodeData(
     extends: n.extends,
     stackOrder: n.stackOrder,
     memberKind: n.memberKind,
-    stackClassId: n.kind === "method" && n.parentId?.startsWith("class:") ? n.parentId : undefined,
+    stackClassId:
+      (n.kind === "method" || (n.kind === "binding" && n.bindingKind === "prop")) &&
+      n.parentId?.startsWith("class:")
+        ? n.parentId
+        : undefined,
     scopeId: n.scopeId,
     bindingKind: n.bindingKind,
     refId: n.refId,
@@ -1070,6 +1193,16 @@ function graphToNodeData(
     importSource: n.importSource,
     receiver: n.receiver,
     hasThis: n.hasThis,
+    hasOptional: n.hasOptional,
+    async: n.async,
+    generator: n.generator,
+    static: n.static,
+    pattern: n.pattern,
+    slotOf: n.slotOf,
+    branchKind: n.branchKind,
+    loopKind: n.loopKind,
+    jsxTag: n.jsxTag,
+    hasRestParam: n.hasRestParam,
     nodeId: n.id,
     frameHeight: expanded ? frameHeight : undefined,
   };
@@ -1215,7 +1348,36 @@ function portName(d: NodeData, handle: string, fallback: string): string {
 }
 
 function isDeclKind(kind: NodeKind): boolean {
-  return kind === "function" || kind === "arrow" || kind === "method";
+  return (
+    kind === "function" ||
+    kind === "arrow" ||
+    kind === "method" ||
+    kind === "branch" ||
+    kind === "loop" ||
+    kind === "try" ||
+    kind === "jsx" ||
+    kind === "fragment"
+  );
+}
+
+function isClassStackMember(n: GraphNode): boolean {
+  return (
+    n.parentId?.startsWith("class:") === true &&
+    (n.kind === "method" || (n.kind === "binding" && n.bindingKind === "prop"))
+  );
+}
+
+function isLayoutBodyNode(n: GraphNode): boolean {
+  if (n.slotOf) return false;
+  if (isClassStackMember(n)) return false;
+  return (
+    n.kind === "binding" ||
+    n.kind === "call" ||
+    n.kind === "expression" ||
+    n.kind === "throw" ||
+    n.kind === "class" ||
+    (isDeclKind(n.kind) && !!n.expandable)
+  );
 }
 
 function edgeStyle(kind: GraphEdge["kind"]): React.CSSProperties {
@@ -1530,7 +1692,11 @@ function applyClassFrame(nodes: Node[], classId: string): Node[] {
   const classNode = nodes.find((n) => n.id === classId);
   const classExpanded = !!(classNode?.data as NodeData | undefined)?.expanded;
   const members = nodes
-    .filter((n) => n.parentId === classId && (n.data as NodeData).kind === "method")
+    .filter((n) => {
+      if (n.parentId !== classId) return false;
+      const d = n.data as NodeData;
+      return d.kind === "method" || (d.kind === "binding" && d.bindingKind === "prop");
+    })
     .sort((a, b) => a.position.y - b.position.y);
 
   if (!classExpanded) {
@@ -1664,11 +1830,11 @@ function classFrameSize(
     return { width: NODE_W, height: NODE_H };
   }
   const members = graph.nodes
-    .filter((m) => m.kind === "method" && m.parentId === cls.id)
+    .filter((m) => isClassStackMember(m) && m.parentId === cls.id)
     .sort((a, b) => (a.stackOrder ?? 0) - (b.stackOrder ?? 0));
   let y = BODY_Y0;
   for (const m of members) {
-    if (expanded.has(m.id)) {
+    if (m.kind === "method" && expanded.has(m.id)) {
       const size = expandFrameSize(graph, m.id, expanded);
       y += Math.max(size.height, MEMBER_H) + MEMBER_GAP;
     } else {
@@ -1710,43 +1876,55 @@ function layoutClassWithMembers(
   if (!classOpen) return out;
 
   const members = graph.nodes
-    .filter((m) => m.kind === "method" && m.parentId === cls.id)
+    .filter((m) => isClassStackMember(m) && m.parentId === cls.id)
     .sort((a, b) => (a.stackOrder ?? 0) - (b.stackOrder ?? 0));
   const memberX = WELL_MARGIN + 12;
   let y = BODY_Y0;
 
   members.forEach((m) => {
-    const isExp = expanded.has(m.id);
-    if (isExp) {
-      const mSize = expandFrameSize(graph, m.id, expanded);
-      const gutter =
-        WELL_MARGIN + 8 + (m.params.length > 0 ? PARAM_RAIL : 12);
-      out.push({
-        id: m.id,
-        type: "methodBlock",
-        parentId: cls.id,
-        position: { x: memberX, y },
-        data: graphToNodeData(m, true, mSize.height),
-        style: { width: mSize.width, height: mSize.height },
-        className: "expand-frame",
-        draggable: true,
-      });
-      out.push(
-        ...layoutScopeContents(
-          graph,
-          m.id,
-          expanded,
-          { x: 0, y: 0 },
-          m.id,
-          gutter,
-          viewMode
-        )
-      );
-      y += Math.max(mSize.height, MEMBER_H) + MEMBER_GAP;
+    if (m.kind === "method") {
+      const isExp = expanded.has(m.id);
+      if (isExp) {
+        const mSize = expandFrameSize(graph, m.id, expanded);
+        const gutter =
+          WELL_MARGIN + 8 + (m.params.length > 0 ? PARAM_RAIL : 12);
+        out.push({
+          id: m.id,
+          type: "methodBlock",
+          parentId: cls.id,
+          position: { x: memberX, y },
+          data: graphToNodeData(m, true, mSize.height),
+          style: { width: mSize.width, height: mSize.height },
+          className: "expand-frame",
+          draggable: true,
+        });
+        out.push(
+          ...layoutScopeContents(
+            graph,
+            m.id,
+            expanded,
+            { x: 0, y: 0 },
+            m.id,
+            gutter,
+            viewMode
+          )
+        );
+        y += Math.max(mSize.height, MEMBER_H) + MEMBER_GAP;
+      } else {
+        out.push({
+          id: m.id,
+          type: "methodBlock",
+          parentId: cls.id,
+          position: { x: memberX, y },
+          data: graphToNodeData(m, false),
+          draggable: true,
+        });
+        y += MEMBER_H + MEMBER_GAP;
+      }
     } else {
       out.push({
         id: m.id,
-        type: "methodBlock",
+        type: "binding",
         parentId: cls.id,
         position: { x: memberX, y },
         data: graphToNodeData(m, false),
@@ -1788,14 +1966,7 @@ function layoutScopeExecution(
   viewMode: ViewMode
 ): Node[] {
   const inScope = graph.nodes.filter((n) => n.scopeId === scopeId && n.id !== scopeId);
-  const candidates = inScope.filter(
-    (n) =>
-      n.kind === "binding" ||
-      n.kind === "call" ||
-      n.kind === "expression" ||
-      n.kind === "class" ||
-      (isDeclKind(n.kind) && n.expandable)
-  );
+  const candidates = inScope.filter(isLayoutBodyNode);
   const ordered = orderByExecution(candidates, graph.edges);
 
   const out: Node[] = [];
@@ -1845,6 +2016,35 @@ function layoutScopeExecution(
       y += size.height + 28;
       continue;
     }
+    if (n.pattern) {
+      const slots = graph.nodes
+        .filter((s) => s.slotOf === n.id)
+        .sort((a, b) => locKey(a) - locKey(b) || a.id.localeCompare(b.id));
+      const nestH = NODE_H + slots.length * 40 + 12;
+      out.push({
+        id: n.id,
+        type: "binding",
+        parentId: asChildrenOf,
+        position: { x: x0, y },
+        data: graphToNodeData(n, false),
+        style: { width: NODE_W + 24, height: nestH },
+        className: "expand-frame",
+        draggable: true,
+      });
+      slots.forEach((s, i) => {
+        out.push({
+          id: s.id,
+          type: "binding",
+          parentId: n.id,
+          position: { x: 10, y: NODE_H - 8 + i * 40 },
+          data: graphToNodeData(s, false),
+          style: { width: NODE_W - 8, height: 36 },
+          draggable: true,
+        });
+      });
+      y += nestH + 20;
+      continue;
+    }
     out.push(plainNode(n, { x: x0, y }, asChildrenOf, false));
     y += NODE_H + 20;
   }
@@ -1872,7 +2072,10 @@ function layoutScopeVariable(
     )
     .sort((a, b) => locKey(a) - locKey(b));
   const body = inScope.filter(
-    (n) => n.kind === "binding" || n.kind === "call" || n.kind === "expression"
+    (n) =>
+      isLayoutBodyNode(n) &&
+      n.kind !== "class" &&
+      !(isDeclKind(n.kind) && n.expandable)
   );
 
   const out: Node[] = [];
@@ -2176,9 +2379,11 @@ function expandFrameSize(graph: StructureGraph, scopeId: string, expanded: Set<s
   const paramRail = (scopeNode?.params.length ?? 0) > 0 ? PARAM_RAIL : 0;
   const inScope = graph.nodes.filter((n) => n.scopeId === scopeId && n.id !== scopeId);
   const decls = inScope.filter((n) => isDeclKind(n.kind) && n.expandable).length;
-  const bindings = inScope.filter((n) => n.kind === "binding").length;
+  const bindings = inScope.filter((n) => n.kind === "binding" && !n.slotOf).length;
   const calls = inScope.filter((n) => n.kind === "call").length;
-  const expressions = inScope.filter((n) => n.kind === "expression").length;
+  const expressions = inScope.filter(
+    (n) => n.kind === "expression" || n.kind === "throw"
+  ).length;
   const classes = inScope.filter((n) => n.kind === "class");
 
   const gutter = EXPAND_PAD + paramRail;
@@ -2730,7 +2935,14 @@ function FlowApp() {
                   if (kind === "call") return "var(--accent-call)";
                   if (kind === "expression") return "var(--accent-expression)";
                   if (kind === "import") return "var(--accent-import)";
+                  if (kind === "export") return "var(--accent-export)";
                   if (kind === "external") return "var(--accent-external)";
+                  if (kind === "branch") return "var(--accent-branch)";
+                  if (kind === "loop") return "var(--accent-loop)";
+                  if (kind === "try") return "var(--accent-try)";
+                  if (kind === "throw") return "var(--accent-throw)";
+                  if (kind === "jsx") return "var(--accent-jsx)";
+                  if (kind === "fragment") return "var(--accent-fragment)";
                   return "var(--accent-function)";
                 }}
                 maskColor="transparent"

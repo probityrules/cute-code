@@ -15,6 +15,12 @@
   --accent-binding: #b07d4f;
   --accent-call: #5a8fb8;
   --accent-expression: #9a7bb8;
+  --accent-branch: #c47a5a;
+  --accent-loop: #5a9a9a;
+  --accent-try: #b85a6e;
+  --accent-throw: #a33c3c;
+  --accent-jsx: #5a9ab8;
+  --accent-fragment: #7a8f9e;
   --edge-calls: #3d9a7a;
   --edge-returns: #c4a35a;
   --edge-param: #6b8cae;
@@ -344,6 +350,60 @@ body,
 .kind-expression {
   --accent: var(--accent-expression);
   border-style: dashed;
+}
+
+.kind-branch {
+  --accent: var(--accent-branch);
+}
+
+.kind-loop {
+  --accent: var(--accent-loop);
+}
+
+.kind-try {
+  --accent: var(--accent-try);
+}
+
+.kind-throw {
+  --accent: var(--accent-throw);
+  min-height: 40px;
+}
+
+.kind-jsx {
+  --accent: var(--accent-jsx);
+}
+
+.kind-fragment {
+  --accent: var(--accent-fragment);
+}
+
+.struct-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.struct-optional-mark {
+  margin-left: 2px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent-call) 80%, var(--muted));
+}
+
+.kind-binding.kind-pattern {
+  min-height: 48px;
+}
+
+.kind-binding.kind-slot {
+  font-size: 12px;
+  min-height: 36px;
+  opacity: 0.95;
 }
 
 .expandable {

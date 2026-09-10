@@ -147,6 +147,36 @@ const lucide: Record<string, IconifyIcon> = {
     width: 24,
     height: 24,
   },
+  "git-branch": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="6" cy="6" r="3"/><path d="M6 9v12"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></g>',
+    width: 24,
+    height: 24,
+  },
+  repeat: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m17 2l4 4l-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22l-4-4l4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></g>',
+    width: 24,
+    height: 24,
+  },
+  "shield-alert": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4m0 4h.01"/></g>',
+    width: 24,
+    height: 24,
+  },
+  bomb: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="11" cy="13" r="9"/><path d="M14.35 4.65L16.3 2.7a2.41 2.41 0 0 1 3.4 0l1.6 1.6a2.4 2.4 0 0 1 0 3.4l-1.95 1.95M22 2l-1.5 1.5"/></g>',
+    width: 24,
+    height: 24,
+  },
+  component: {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 11.293a1 1 0 0 0 0 1.414l2.376 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0zm-13.518 0a1 1 0 0 0 0 1.414l2.377 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414L5.809 8.916a1 1 0 0 0-1.414 0zM8.916 15.536a1 1 0 0 0 0 1.414l2.377 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414l-2.377-2.377a1 1 0 0 0-1.414 0zm0-13.518a1 1 0 0 0 0 1.414l2.377 2.377a1 1 0 0 0 1.414 0l2.377-2.377a1 1 0 0 0 0-1.414L12.707.607a1 1 0 0 0-1.414 0z"/>',
+    width: 24,
+    height: 24,
+  },
+  group: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></g>',
+    width: 24,
+    height: 24,
+  },
 };
 
 for (const [name, data] of Object.entries(lucide)) {
@@ -246,6 +276,18 @@ function kindIconSpec(
       return { icon: "sigma", label: "Expression" };
     case "module":
       return { icon: "file-code-2", label: "Module" };
+    case "branch":
+      return { icon: "git-branch", label: "Branch" };
+    case "loop":
+      return { icon: "repeat", label: "Loop" };
+    case "try":
+      return { icon: "shield-alert", label: "Try / catch" };
+    case "throw":
+      return { icon: "bomb", label: "Throw" };
+    case "jsx":
+      return { icon: "component", label: "JSX element" };
+    case "fragment":
+      return { icon: "group", label: "JSX fragment" };
     default:
       return { icon: "box", label: kind };
   }

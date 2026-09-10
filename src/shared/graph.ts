@@ -12,7 +12,13 @@ export type NodeKind =
   | "binding"
   | "call"
   /** Inline equation / template / operator expression */
-  | "expression";
+  | "expression"
+  | "branch"
+  | "loop"
+  | "try"
+  | "throw"
+  | "jsx"
+  | "fragment";
 
 export type EdgeKind = "calls" | "param" | "returns" | "thread" | "ref" | "flow";
 
@@ -63,6 +69,26 @@ export interface GraphNode {
   receiver?: string;
   /** Member call or this.prop write: show this affordance. */
   hasThis?: boolean;
+  /** Optional chaining on call / member path */
+  hasOptional?: boolean;
+  /** async function / method / arrow */
+  async?: boolean;
+  /** generator function / method */
+  generator?: boolean;
+  /** static class field or method */
+  static?: boolean;
+  /** Parent destructuring binding (ObjectPattern / ArrayPattern) */
+  pattern?: boolean;
+  /** Child slot's parent binding id */
+  slotOf?: string;
+  /** branch node subtype */
+  branchKind?: "if" | "switch";
+  /** loop node subtype */
+  loopKind?: "for" | "for-of" | "for-in" | "while" | "do";
+  /** JSX opening tag name */
+  jsxTag?: string;
+  /** Call has a spread argument → param:rest handle */
+  hasRestParam?: boolean;
 }
 
 export interface GraphEdge {

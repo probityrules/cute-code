@@ -12,6 +12,7 @@ function kindRank(kind: NodeKind): number {
     case "expression":
       return 0;
     case "call":
+    case "throw":
       return 1;
     case "binding":
       return 2;
@@ -19,6 +20,11 @@ function kindRank(kind: NodeKind): number {
     case "function":
     case "arrow":
     case "method":
+    case "branch":
+    case "loop":
+    case "try":
+    case "jsx":
+    case "fragment":
       return 3;
     default:
       return 4;
