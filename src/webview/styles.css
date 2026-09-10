@@ -166,6 +166,18 @@ body,
   height: 100%;
 }
 
+/* Smooth node moves/resizes during view-mode layout switches */
+.canvas.layout-tween .react-flow__node {
+  transition:
+    transform 0.38s ease,
+    width 0.38s ease,
+    height 0.38s ease;
+}
+
+.canvas.layout-tween .react-flow__node.dragging {
+  transition: none !important;
+}
+
 .status {
   display: grid;
   place-content: center;

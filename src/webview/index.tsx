@@ -20,6 +20,7 @@ import {
   useNodesState,
   useReactFlow,
   useUpdateNodeInternals,
+  useStoreApi,
   type Edge,
   type Node,
   type NodeProps,
@@ -1784,6 +1785,35 @@ function absPos(node: Node, byId: Map<string, Node>): { x: number; y: number } {
   return { x, y };
 }
 
+function nodeCenterAbs(node: Node, byId: Map<string, Node>): { x: number; y: number } {
+  const { x, y } = absPos(node, byId);
+  const { w, h } = nodeBoxSize(node);
+  return { x: x + w / 2, y: y + h / 2 };
+}
+
+/** Node whose center is closest to a flow-space point (skips rails). */
+function closestNodeToFlowPoint(
+  nodes: Node[],
+  flowX: number,
+  flowY: number
+): { id: string; offsetX: number; offsetY: number } | null {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  let best: { id: string; dist: number; offsetX: number; offsetY: number } | null = null;
+  for (const n of nodes) {
+    if (n.type === "importRail" || n.type === "exportRail") continue;
+    const c = nodeCenterAbs(n, byId);
+    const dx = c.x - flowX;
+    const dy = c.y - flowY;
+    const dist = dx * dx + dy * dy;
+    if (!best || dist < best.dist) {
+      best = { id: n.id, dist, offsetX: dx, offsetY: dy };
+    }
+  }
+  return best ? { id: best.id, offsetX: best.offsetX, offsetY: best.offsetY } : null;
+}
+
+const LAYOUT_TWEEN_MS = 380;
+
 function findInsertClass(
   nodes: Node[],
   abs: { x: number; y: number },
@@ -2576,11 +2606,76 @@ function FlowApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [edgeVis, setEdgeVis] = useState<EdgeVisibility>(() => loadEdgeVisibility());
   const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode());
-  const { getNodes, setCenter, getNode } = useReactFlow();
+  const [layoutTween, setLayoutTween] = useState(false);
+  const { getNodes, setCenter, getNode, getViewport } = useReactFlow();
+  const storeApi = useStoreApi();
   const updateNodeInternals = useUpdateNodeInternals();
   const graphRef = useRef<StructureGraph | null>(null);
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
+  const layoutTweenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flowViewportCenter = useCallback(() => {
+    const { x: vx, y: vy, zoom } = getViewport();
+    const { width: paneW, height: paneH } = storeApi.getState();
+    if (!paneW || !paneH || zoom <= 0) return null;
+    return {
+      x: (paneW / 2 - vx) / zoom,
+      y: (paneH / 2 - vy) / zoom,
+      zoom,
+    };
+  }, [getViewport, storeApi]);
+
+  /** Pan so `nodeId`'s center sits at viewportCenter + (offsetX, offsetY). */
+  const restoreNodeOffset = useCallback(
+    (nodeId: string, offsetX: number, offsetY: number, zoom: number) => {
+      const run = () => {
+        const nodesNow = getNodes();
+        const byId = new Map(nodesNow.map((n) => [n.id, n]));
+        const node = byId.get(nodeId) ?? getNode(nodeId);
+        if (!node) return;
+        const c = nodeCenterAbs(node, byId);
+        void setCenter(c.x - offsetX, c.y - offsetY, { zoom, duration: LAYOUT_TWEEN_MS });
+      };
+      requestAnimationFrame(() => {
+        requestAnimationFrame(run);
+      });
+    },
+    [getNodes, getNode, setCenter]
+  );
+
+  /** Pan (tweened) so `nodeId` is centered — or top/left-aligned if it overflows the pane. */
+  const focusNodeInView = useCallback(
+    (nodeId: string) => {
+      const run = () => {
+        const nodesNow = getNodes();
+        const byId = new Map(nodesNow.map((n) => [n.id, n]));
+        const node = byId.get(nodeId) ?? getNode(nodeId);
+        if (!node) return;
+
+        const { x: left, y: top } = absPos(node, byId);
+        const { w, h } = nodeBoxSize(node);
+        const { zoom } = getViewport();
+        const { width: paneW, height: paneH } = storeApi.getState();
+        if (!paneW || !paneH || zoom <= 0) return;
+
+        const viewW = paneW / zoom;
+        const viewH = paneH / zoom;
+
+        // Overflowing axis: align viewport edge to node edge; otherwise center.
+        const cx = w > viewW ? left + viewW / 2 : left + w / 2;
+        const cy = h > viewH ? top + viewH / 2 : top + h / 2;
+
+        void setCenter(cx, cy, { zoom, duration: LAYOUT_TWEEN_MS });
+      };
+
+      // Wait for layout + DOM measure after expand/collapse.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(run);
+      });
+    },
+    [getNodes, getNode, getViewport, setCenter, storeApi]
+  );
 
   const toggleEdgeKind = useCallback((kind: EdgeKind) => {
     setEdgeVis((prev) => {
@@ -2592,16 +2687,33 @@ function FlowApp() {
 
   const selectViewMode = useCallback(
     (mode: ViewMode) => {
+      if (mode === viewModeRef.current) return;
+      const g = graphRef.current;
+      const center = flowViewportCenter();
+      const anchor =
+        center != null ? closestNodeToFlowPoint(getNodes(), center.x, center.y) : null;
+
       setViewMode(mode);
       saveViewMode(mode);
-      const g = graphRef.current;
+
       if (g) {
+        setLayoutTween(true);
+        if (layoutTweenTimer.current) clearTimeout(layoutTweenTimer.current);
+        layoutTweenTimer.current = setTimeout(() => {
+          setLayoutTween(false);
+          layoutTweenTimer.current = null;
+        }, LAYOUT_TWEEN_MS + 40);
+
         const laid = layoutGraph(g, expanded, mode);
         setNodes(laid.nodes);
         setEdges(laid.edges);
+
+        if (anchor && center) {
+          restoreNodeOffset(anchor.id, anchor.offsetX, anchor.offsetY, center.zoom);
+        }
       }
     },
-    [expanded, setNodes, setEdges]
+    [expanded, setNodes, setEdges, getNodes, flowViewportCenter, restoreNodeOffset]
   );
 
   const relayout = useCallback(
@@ -2612,6 +2724,12 @@ function FlowApp() {
     },
     [setNodes, setEdges]
   );
+
+  useEffect(() => {
+    return () => {
+      if (layoutTweenTimer.current) clearTimeout(layoutTweenTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (event: MessageEvent<HostToWebviewMessage>) => {
@@ -2749,8 +2867,9 @@ function FlowApp() {
       else next.add(nodeId);
       setExpanded(next);
       relayout(g, next);
+      focusNodeInView(nodeId);
     },
-    [expanded, relayout]
+    [expanded, relayout, focusNodeInView]
   );
 
   const openImport = useCallback((source: string) => {
@@ -2908,7 +3027,7 @@ function FlowApp() {
               {graph ? ` · ${expanded.size} expanded` : ""}
             </span>
           </header>
-          <div className="canvas">
+          <div className={`canvas ${layoutTween ? "layout-tween" : ""}`}>
             <ReactFlow
               nodes={nodes}
               edges={highlightedEdges}
