@@ -527,6 +527,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         params: paramNames(path.node.params),
         returnsLabel: simpleReturnLabel(path.node.body),
         loc: locOf(path.node),
+        nameLoc: locOf(path.node.id),
         parentId: outerScope === MODULE_ID ? MODULE_ID : outerScope,
         scopeId: outerScope,
         expandable: true,
@@ -560,6 +561,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         params: [],
         extends: extendsLabel,
         loc: locOf(path.node),
+        nameLoc: locOf(path.node.id),
         parentId: MODULE_ID,
         scopeId: outerScope,
         expandable: true,
@@ -588,6 +590,12 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           const mid = `method:${name}.${methodName}:L${member.loc?.start.line ?? 0}`;
           nameToId.set(`${name}.${methodName}`, mid);
           nameToId.set(methodName, mid);
+          let methodNameLoc: SourceLoc | undefined;
+          if (t.isIdentifier(member.key) && !member.computed) {
+            methodNameLoc = locOf(member.key);
+          } else if (t.isPrivateName(member.key)) {
+            methodNameLoc = locOf(member.key);
+          }
           addNode({
             id: mid,
             kind: "method",
@@ -597,6 +605,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
               ? simpleReturnLabel(member.body)
               : undefined,
             loc: locOf(member),
+            nameLoc: methodNameLoc,
             parentId: classId,
             scopeId: classId,
             stackOrder: stackOrder++,
@@ -611,14 +620,18 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
 
         if (t.isClassProperty(member) || t.isClassPrivateProperty(member)) {
           let propName = "prop";
+          let propNameLoc: SourceLoc | undefined;
           if (t.isClassPrivateProperty(member) && t.isPrivateName(member.key)) {
             propName = `#${member.key.id.name}`;
-          } else if (t.isIdentifier(member.key)) {
+            propNameLoc = locOf(member.key);
+          } else if (t.isIdentifier(member.key) && !member.computed) {
             propName = member.key.name;
+            propNameLoc = locOf(member.key);
           } else if (t.isStringLiteral(member.key)) {
             propName = member.key.value;
           } else if (t.isPrivateName(member.key) && t.isIdentifier(member.key.id)) {
             propName = `#${member.key.id.name}`;
+            propNameLoc = locOf(member.key);
           }
 
           const line = member.loc?.start.line ?? 0;
@@ -630,6 +643,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
             params: [],
             bindingKind: "prop",
             loc: locOf(member),
+            nameLoc: propNameLoc,
             parentId: classId,
             scopeId: classId,
             stackOrder: stackOrder++,
@@ -663,6 +677,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
             params: paramNames(init.params),
             returnsLabel: simpleReturnLabel(init.body),
             loc: locOf(path.node),
+            nameLoc: locOf(path.node.id),
             parentId: outerScope === MODULE_ID ? MODULE_ID : outerScope,
             scopeId: outerScope,
             expandable: true,
@@ -680,6 +695,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           params: [],
           bindingKind: bk,
           loc: locOf(path.node),
+          nameLoc: locOf(path.node.id),
           scopeId: outerScope,
           parentId: outerScope === MODULE_ID ? undefined : outerScope,
         });
@@ -754,6 +770,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           label: local,
           params: [],
           loc: locOf(path.node),
+          nameLoc: locOf(spec.local),
           parentId: MODULE_ID,
           scopeId: MODULE_ID,
           returnsLabel: source,
@@ -801,6 +818,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           label: name,
           params: [],
           loc: locOf(spec),
+          nameLoc: locOf(spec.exported),
           parentId: MODULE_ID,
           scopeId: MODULE_ID,
         });
@@ -1041,6 +1059,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           params: [],
           bindingKind: "let",
           loc: locOf(handler.param),
+          nameLoc: t.isIdentifier(handler.param) ? locOf(handler.param) : undefined,
           scopeId: id,
           parentId: id,
         });
@@ -1104,12 +1123,20 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       const refId =
         rootId && rootId[0] === rootId[0]?.toUpperCase() ? nameToId.get(rootId) : undefined;
 
+      const jsxName = path.node.openingElement.name;
+      // Only self-closing tags: renaming the open name alone would mismatch `</Tag>`.
+      const jsxNameLoc =
+        t.isJSXIdentifier(jsxName) && path.node.openingElement.selfClosing
+          ? locOf(jsxName)
+          : undefined;
+
       addNode({
         id,
         kind: "jsx",
         label: `<${tag}>`,
         params: propNames,
         loc: locOf(path.node),
+        nameLoc: jsxNameLoc,
         scopeId: outer,
         parentId: outer === MODULE_ID ? undefined : outer,
         expandable: hasKids,
@@ -1439,6 +1466,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       label: sourceSlice(expr, code),
       params: inputs.map((i) => (i.kind === "id" ? i.name : i.label)),
       loc: locOf(expr),
+      nameLoc: locOf(expr),
       scopeId,
       parentId: scopeId === MODULE_ID ? undefined : scopeId,
     });
@@ -1585,12 +1613,25 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       (memberCallee && t.isOptionalMemberExpression(memberCallee)) ||
       false;
 
+    let callNameLoc: SourceLoc | undefined;
+    const callee = path.node.callee;
+    if (t.isIdentifier(callee)) {
+      callNameLoc = locOf(callee);
+    } else if (
+      (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)) &&
+      !callee.computed &&
+      t.isIdentifier(callee.property)
+    ) {
+      callNameLoc = locOf(callee.property);
+    }
+
     addNode({
       id: callId,
       kind: "call",
       label: callLabel,
       params: callParams,
       loc: locOf(path.node),
+      nameLoc: callNameLoc,
       scopeId,
       refId: resolved?.id,
       parentId: scopeId === MODULE_ID ? undefined : scopeId,

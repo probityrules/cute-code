@@ -42,6 +42,12 @@ export interface GraphNode {
   returnsLabel?: string;
   loc?: SourceLoc;
   /**
+   * Span of the editable title in source (identifier / expression / tag name).
+   * When set, the block title can be renamed and written back via this range.
+   * Full-node `loc` remains the reveal/select range.
+   */
+  nameLoc?: SourceLoc;
+  /**
    * Structural parent for class stacks (class id) or nested decl containers.
    * Not used for expand visibility — see scopeId.
    */
@@ -120,7 +126,8 @@ export type HostToWebviewMessage =
   | { type: "setGraph"; graph: StructureGraph }
   | { type: "setError"; error: ParseErrorPayload }
   | { type: "setEmpty"; reason: string }
-  | { type: "applyEdit"; edit: unknown } // reserved for bidirectional
+  | { type: "renameTitleResult"; ok: true; nodeId: string; graph: StructureGraph }
+  | { type: "renameTitleResult"; ok: false; nodeId: string; message: string }
   ;
 
 /** Webview → host */
@@ -128,5 +135,10 @@ export type WebviewToHostMessage =
   | { type: "ready" }
   | { type: "selectNode"; nodeId: string; loc?: SourceLoc }
   | { type: "openImport"; source: string }
-  | { type: "graphChanged"; graph: StructureGraph } // reserved for bidirectional
+  | {
+      type: "renameTitle";
+      nodeId: string;
+      nameLoc: SourceLoc;
+      newText: string;
+    }
   ;

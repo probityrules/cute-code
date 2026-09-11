@@ -38,6 +38,7 @@ import type {
   MemberKind,
   NodeKind,
   ParseErrorPayload,
+  SourceLoc,
   StructureGraph,
   WebviewToHostMessage,
 } from "../shared/graph";
@@ -130,6 +131,37 @@ function saveViewMode(mode: ViewMode) {
   }
 }
 
+function titleEditValue(kind: NodeKind, label: string, jsxTag?: string): string {
+  if (kind === "call" && label.endsWith("()")) return label.slice(0, -2);
+  if (kind === "jsx" && jsxTag) return jsxTag;
+  return label;
+}
+
+function remapExpandedIds(
+  prev: Set<string>,
+  oldNodes: GraphNode[] | undefined,
+  newNodes: GraphNode[]
+): Set<string> {
+  const next = new Set<string>();
+  const expandable = newNodes.filter((n) => n.expandable);
+  for (const id of prev) {
+    if (expandable.some((n) => n.id === id)) {
+      next.add(id);
+      continue;
+    }
+    const old = oldNodes?.find((n) => n.id === id);
+    if (!old?.loc) continue;
+    const match = expandable.find(
+      (n) =>
+        n.kind === old.kind &&
+        n.loc?.startLine === old.loc!.startLine &&
+        n.loc?.startCol === old.loc!.startCol
+    );
+    if (match) next.add(match.id);
+  }
+  return next;
+}
+
 function KindTitle({
   kind,
   label,
@@ -140,6 +172,9 @@ function KindTitle({
   generator,
   isStatic,
   hasOptional,
+  nameLoc,
+  nodeId,
+  jsxTag,
 }: {
   kind: NodeKind;
   label: string;
@@ -151,15 +186,87 @@ function KindTitle({
   generator?: boolean;
   isStatic?: boolean;
   hasOptional?: boolean;
+  nameLoc?: SourceLoc;
+  nodeId?: string;
+  jsxTag?: string;
 }) {
+  const actions = useNodeActions();
+  const editable = Boolean(nameLoc && nodeId);
+  const sourceValue = titleEditValue(kind, label, jsxTag);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(sourceValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(sourceValue);
+  }, [sourceValue, editing]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    if (!editing) return;
+    setEditing(false);
+    if (!editable || !nameLoc || !nodeId) return;
+    if (draft === sourceValue) return;
+    actions.renameTitle(nodeId, nameLoc, draft);
+  };
+
+  const cancel = () => {
+    setDraft(sourceValue);
+    setEditing(false);
+  };
+
   return (
     <div className="struct-title-row">
       <KindIcon kind={kind} memberKind={memberKind} bindingKind={bindingKind} />
       {receiver === "this" && <IconThis />}
-      <div className="struct-label">
-        {label}
-        {hasOptional && <span className="struct-optional-mark">?</span>}
-      </div>
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="struct-label-input nodrag nopan"
+          value={draft}
+          spellCheck={false}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+            e.stopPropagation();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <div
+          className={`struct-label ${editable ? "editable" : ""}`}
+          title={editable ? "Click to edit title" : undefined}
+          onClick={(e) => {
+            if (!editable) return;
+            e.stopPropagation();
+            setEditing(true);
+          }}
+          onMouseDown={(e) => {
+            if (editable) e.stopPropagation();
+          }}
+          onDoubleClick={(e) => {
+            if (editable) e.stopPropagation();
+          }}
+        >
+          {label}
+          {hasOptional && <span className="struct-optional-mark">?</span>}
+        </div>
+      )}
       {isStatic && <span className="struct-badge">static</span>}
       {isAsync && <span className="struct-badge">async</span>}
       {generator && <span className="struct-badge">*</span>}
@@ -170,11 +277,13 @@ function KindTitle({
 type NodeActions = {
   toggleExpand: (nodeId: string) => void;
   openImport: (source: string) => void;
+  renameTitle: (nodeId: string, nameLoc: SourceLoc, newText: string) => void;
 };
 
 const NodeActionsContext = createContext<NodeActions>({
   toggleExpand: () => undefined,
   openImport: () => undefined,
+  renameTitle: () => undefined,
 });
 
 function useNodeActions() {
@@ -255,6 +364,7 @@ type NodeData = {
   params: string[];
   returnsLabel?: string;
   loc?: StructureGraph["nodes"][0]["loc"];
+  nameLoc?: SourceLoc;
   extends?: string;
   stackOrder?: number;
   memberKind?: MemberKind;
@@ -594,6 +704,9 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
           label={d.label}
           async={d.async}
           generator={d.generator}
+          nameLoc={d.nameLoc}
+          nodeId={nodeId}
+          jsxTag={d.jsxTag}
         />
         {d.branchKind && (
           <div className="struct-returns">{d.branchKind}</div>
@@ -707,7 +820,7 @@ function ClassHeaderView({ data, selected, id }: NodeProps) {
         style={d.extends ? { left: "72%" } : undefined}
       />
       <div className="decl-header">
-        <KindTitle kind="class" label={d.label} />
+        <KindTitle kind="class" label={d.label} nameLoc={d.nameLoc} nodeId={nodeId} />
         {refMode === "labels" && (
           <div className={`struct-ref-caption ${d.extends ? "" : "muted"}`}>
             {extendsText}
@@ -805,6 +918,8 @@ function MethodBlockView({ data, selected, id }: NodeProps) {
           async={d.async}
           generator={d.generator}
           isStatic={d.static}
+          nameLoc={d.nameLoc}
+          nodeId={nodeId}
         />
         {!expanded && d.params.length > 0 && (
           <div className="struct-params">
@@ -843,8 +958,9 @@ function MethodBlockView({ data, selected, id }: NodeProps) {
   );
 }
 
-function BindingNodeView({ data, selected }: NodeProps) {
+function BindingNodeView({ data, selected, id }: NodeProps) {
   const d = data as NodeData;
+  const nodeId = d.nodeId ?? id;
   const threadMode = useEdgeMode("thread");
   const isProp = d.bindingKind === "prop";
   const threadLines = threadMode === "lines";
@@ -873,6 +989,8 @@ function BindingNodeView({ data, selected }: NodeProps) {
         bindingKind={d.bindingKind}
         receiver={d.receiver}
         isStatic={d.static}
+        nameLoc={d.pattern || d.slotOf ? undefined : d.nameLoc}
+        nodeId={nodeId}
       />
       {d.pattern && d.params.length > 0 && (
         <div className="struct-params">
@@ -902,8 +1020,9 @@ function BindingNodeView({ data, selected }: NodeProps) {
 }
 
 /** Import parked on the left of the file graph. */
-function ImportRailView({ data, selected }: NodeProps) {
+function ImportRailView({ data, selected, id }: NodeProps) {
   const d = data as NodeData;
+  const nodeId = d.nodeId ?? id;
   const actions = useNodeActions();
   const refMode = useEdgeMode("ref");
   const threadMode = useEdgeMode("thread");
@@ -944,7 +1063,7 @@ function ImportRailView({ data, selected }: NodeProps) {
           style={{ right: -4, top: "50%" }}
         />
       )}
-      <KindTitle kind="import" label={d.label} />
+      <KindTitle kind="import" label={d.label} nameLoc={d.nameLoc} nodeId={nodeId} />
       {d.importSource && (
         <div className="struct-returns rail-meta">{d.importSource}</div>
       )}
@@ -953,8 +1072,9 @@ function ImportRailView({ data, selected }: NodeProps) {
 }
 
 /** Export parked on the right of the file graph. */
-function ExportRailView({ data, selected }: NodeProps) {
+function ExportRailView({ data, selected, id }: NodeProps) {
   const d = data as NodeData;
+  const nodeId = d.nodeId ?? id;
   const returnsMode = useEdgeMode("returns");
   const threadMode = useEdgeMode("thread");
   const portVisible = returnsMode === "lines" || threadMode === "lines";
@@ -983,7 +1103,7 @@ function ExportRailView({ data, selected }: NodeProps) {
         id="out"
         title="outside module"
       />
-      <KindTitle kind="export" label={d.label} />
+      <KindTitle kind="export" label={d.label} nameLoc={d.nameLoc} nodeId={nodeId} />
       {d.importSource && (
         <div className="struct-returns rail-meta">from {d.importSource}</div>
       )}
@@ -991,8 +1111,9 @@ function ExportRailView({ data, selected }: NodeProps) {
   );
 }
 
-function CallNodeView({ data, selected }: NodeProps) {
+function CallNodeView({ data, selected, id }: NodeProps) {
   const d = data as NodeData;
+  const nodeId = d.nodeId ?? id;
   const show = useShowEdge();
   const threadMode = useEdgeMode("thread");
   const refMode = useEdgeMode("ref");
@@ -1084,6 +1205,8 @@ function CallNodeView({ data, selected }: NodeProps) {
         label={d.label}
         receiver={d.receiver}
         hasOptional={d.hasOptional}
+        nameLoc={d.nameLoc}
+        nodeId={nodeId}
       />
       {d.importSource && (
         <div className="struct-returns rail-meta">{d.importSource}</div>
@@ -1096,8 +1219,9 @@ function CallNodeView({ data, selected }: NodeProps) {
 }
 
 /** Inline equation / template / operator — inputs on left, single return on right. */
-function ExpressionNodeView({ data, selected }: NodeProps) {
+function ExpressionNodeView({ data, selected, id }: NodeProps) {
   const d = data as NodeData;
+  const nodeId = d.nodeId ?? id;
   const threadMode = useEdgeMode("thread");
   const n = d.params.length;
   const threadLines = threadMode === "lines";
@@ -1142,7 +1266,13 @@ function ExpressionNodeView({ data, selected }: NodeProps) {
           style={{ right: -4, top: "50%" }}
         />
       )}
-      <KindTitle kind="expression" label={d.label} receiver={d.receiver} />
+      <KindTitle
+        kind="expression"
+        label={d.label}
+        receiver={d.receiver}
+        nameLoc={d.nameLoc}
+        nodeId={nodeId}
+      />
       {threadLines && n > 0 && (
         <div className="struct-params">
           {d.params.map((p, i) => (
@@ -1178,6 +1308,7 @@ function graphToNodeData(
     params: n.params,
     returnsLabel: n.returnsLabel,
     loc: n.loc,
+    nameLoc: n.nameLoc,
     extends: n.extends,
     stackOrder: n.stackOrder,
     memberKind: n.memberKind,
@@ -2577,14 +2708,6 @@ function layoutGraph(
         target: e.target,
         sourceHandle: e.sourceHandle ?? (isRef ? "ref" : undefined),
         targetHandle: e.targetHandle ?? (isRef ? "ref" : undefined),
-        label:
-          e.kind === "ref"
-            ? e.label ?? "def"
-            : e.kind === "flow"
-              ? undefined
-              : e.kind === "thread"
-                ? e.label ?? "thread"
-                : e.label ?? e.kind,
         animated: e.kind === "thread" || e.kind === "flow",
         className: `edge-${e.kind}`,
         data: { edgeKind: e.kind },
@@ -2611,6 +2734,8 @@ function FlowApp() {
   const storeApi = useStoreApi();
   const updateNodeInternals = useUpdateNodeInternals();
   const graphRef = useRef<StructureGraph | null>(null);
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
   const layoutTweenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2740,11 +2865,48 @@ function FlowApp() {
         if (msg.type === "setGraph") {
           setError(null);
           setEmpty(null);
+          const prev = graphRef.current;
+          const sameFile = prev?.fileName != null && prev.fileName === msg.graph.fileName;
+          const nextExpanded = sameFile
+            ? remapExpandedIds(expandedRef.current, prev?.nodes, msg.graph.nodes)
+            : new Set<string>();
           setGraph(msg.graph);
           graphRef.current = msg.graph;
-          setExpanded(new Set());
-          relayout(msg.graph, new Set());
-          setSelectedId(null);
+          setExpanded(nextExpanded);
+          relayout(msg.graph, nextExpanded);
+          if (!sameFile) setSelectedId(null);
+        } else if (msg.type === "renameTitleResult") {
+          if (msg.ok) {
+            setError(null);
+            setEmpty(null);
+            const prev = graphRef.current;
+            const nextExpanded = remapExpandedIds(
+              expandedRef.current,
+              prev?.nodes,
+              msg.graph.nodes
+            );
+            // Remap selection if the edited node id changed with the rename.
+            setSelectedId((cur) => {
+              if (!cur) return cur;
+              if (msg.graph.nodes.some((n) => n.id === cur)) return cur;
+              const old = prev?.nodes.find((n) => n.id === cur);
+              if (!old?.loc) return msg.nodeId;
+              const match = msg.graph.nodes.find(
+                (n) =>
+                  n.kind === old.kind &&
+                  n.loc?.startLine === old.loc!.startLine &&
+                  n.loc?.startCol === old.loc!.startCol
+              );
+              return match?.id ?? msg.nodeId;
+            });
+            setGraph(msg.graph);
+            graphRef.current = msg.graph;
+            setExpanded(nextExpanded);
+            relayout(msg.graph, nextExpanded);
+          } else {
+            // Invalid JS — document unchanged; keep current graph/title.
+            console.warn("Cute Code: title edit rejected:", msg.message);
+          }
         } else if (msg.type === "setError") {
           setError(msg.error);
           setEmpty(null);
@@ -2876,9 +3038,13 @@ function FlowApp() {
     vscode.postMessage({ type: "openImport", source });
   }, []);
 
+  const renameTitle = useCallback((nodeId: string, nameLoc: SourceLoc, newText: string) => {
+    vscode.postMessage({ type: "renameTitle", nodeId, nameLoc, newText });
+  }, []);
+
   const nodeActions = useMemo(
-    () => ({ toggleExpand, openImport }),
-    [toggleExpand, openImport]
+    () => ({ toggleExpand, openImport, renameTitle }),
+    [toggleExpand, openImport, renameTitle]
   );
 
   const onNodeDragStop: OnNodeDrag = useCallback(

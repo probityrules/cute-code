@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { extractGraph } from "./parser/extractGraph";
+import { tryTitleEdit } from "./parser/titleEdit";
 import type {
   HostToWebviewMessage,
   SourceLoc,
@@ -31,6 +32,8 @@ class StructureViewProvider implements vscode.Disposable {
   private panelDisposables: vscode.Disposable[] = [];
   /** Keep parsing this doc even when the webview steals focus. */
   private trackedDocUri: vscode.Uri | undefined;
+  /** Skip auto-push while we apply a validated title edit (graph already sent). */
+  private suppressDocPushUntil = 0;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -70,16 +73,23 @@ class StructureViewProvider implements vscode.Disposable {
         this.disposePanelListeners();
       }),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (isJsDocument(editor?.document)) {
-          this.trackedDocUri = editor.document.uri;
-          this.schedulePush();
+        if (!isJsDocument(editor?.document)) {
+          // Ignore focus loss to the webview / non-JS editors — keep last graph.
+          return;
         }
-        // Ignore focus loss to the webview / non-JS editors — keep last graph.
+        const uri = editor.document.uri;
+        // Same tracked file regained focus (e.g. clicking a node reveals source).
+        // Re-pushing would reset the webview and collapse expanded blocks.
+        if (this.trackedDocUri?.toString() === uri.toString()) return;
+        this.trackedDocUri = uri;
+        this.schedulePush();
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
-        if (this.trackedDocUri && e.document.uri.toString() === this.trackedDocUri.toString()) {
-          this.schedulePush();
+        if (!this.trackedDocUri || e.document.uri.toString() !== this.trackedDocUri.toString()) {
+          return;
         }
+        if (Date.now() < this.suppressDocPushUntil) return;
+        this.schedulePush();
       }),
       vscode.workspace.onDidCloseTextDocument((doc) => {
         if (this.trackedDocUri && doc.uri.toString() === this.trackedDocUri.toString()) {
@@ -160,7 +170,75 @@ class StructureViewProvider implements vscode.Disposable {
 
     if (msg.type === "openImport") {
       await openImportSource(msg.source, this.trackedDocUri);
+      return;
     }
+
+    if (msg.type === "renameTitle") {
+      await this.renameTitle(msg.nodeId, msg.nameLoc, msg.newText);
+    }
+  }
+
+  private async renameTitle(nodeId: string, nameLoc: SourceLoc, newText: string) {
+    const doc = this.resolveJsDocument();
+    if (!doc) {
+      this.post({
+        type: "renameTitleResult",
+        ok: false,
+        nodeId,
+        message: "No JavaScript file is open.",
+      });
+      return;
+    }
+
+    const trimmed = newText;
+    if (trimmed.length === 0) {
+      this.post({
+        type: "renameTitleResult",
+        ok: false,
+        nodeId,
+        message: "Title cannot be empty.",
+      });
+      return;
+    }
+
+    const preview = tryTitleEdit(doc.getText(), nameLoc, trimmed, doc.fileName);
+    if (!preview.ok) {
+      this.post({
+        type: "renameTitleResult",
+        ok: false,
+        nodeId,
+        message: preview.error.message,
+      });
+      return;
+    }
+
+    const start = new vscode.Position(
+      Math.max(0, nameLoc.startLine - 1),
+      nameLoc.startCol
+    );
+    const end = new vscode.Position(Math.max(0, nameLoc.endLine - 1), nameLoc.endCol);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(doc.uri, new vscode.Range(start, end), trimmed);
+
+    this.suppressDocPushUntil = Date.now() + 500;
+    const applied = await vscode.workspace.applyEdit(edit);
+    if (!applied) {
+      this.suppressDocPushUntil = 0;
+      this.post({
+        type: "renameTitleResult",
+        ok: false,
+        nodeId,
+        message: "Could not apply edit to the document.",
+      });
+      return;
+    }
+
+    this.post({
+      type: "renameTitleResult",
+      ok: true,
+      nodeId,
+      graph: preview.graph,
+    });
   }
 
   private getHtml(webview: vscode.Webview): string {
