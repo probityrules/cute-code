@@ -38,7 +38,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
-    "test": "node --import tsx --test src/parser/extractGraph.test.ts src/parser/titleEdit.test.ts",
+    "test": "node --import tsx --test src/parser/extractGraph.test.ts src/parser/titleEdit.test.ts src/webview/presentation.test.ts",
     "vscode:prepublish": "npm run build"
   },
   "devDependencies": {

@@ -219,17 +219,36 @@ describe("extractGraph", () => {
     const code = `
       import { readFile } from "fs";
       const load = (path) => readFile(path);
+      load("./x");
     `;
     const result = extractGraph(code);
     assert.equal(result.ok, true);
     if (!result.ok) return;
-    assert.ok(result.graph.nodes.some((n) => n.kind === "arrow" && n.label === "load"));
+    const arrow = result.graph.nodes.find((n) => n.kind === "arrow");
+    assert.ok(arrow);
+    assert.equal(arrow?.label, "() => {}");
+    assert.equal(arrow?.bindingName, "load");
+    const binding = result.graph.nodes.find(
+      (n) => n.kind === "binding" && n.label === "load"
+    );
+    assert.ok(binding);
+    assert.equal(binding?.valueType, "function");
+    assert.ok(
+      result.graph.edges.some(
+        (e) =>
+          e.kind === "thread" &&
+          e.source === arrow?.id &&
+          e.target === binding?.id
+      )
+    );
     assert.ok(result.graph.nodes.some((n) => n.kind === "import" && n.label === "readFile"));
     assert.ok(
       result.graph.nodes.some(
         (n) => n.kind === "call" && n.refId?.includes("import:readFile")
       )
     );
+    const loadCall = result.graph.nodes.find((n) => n.kind === "call" && n.label === "load()");
+    assert.equal(loadCall?.refId, arrow?.id);
   });
 
   it("keeps import/export rails out of worker flow with export handles", () => {
@@ -242,7 +261,7 @@ describe("extractGraph", () => {
     assert.equal(result.ok, true);
     if (!result.ok) return;
     const mod = result.graph.nodes.find((n) => n.kind === "module");
-    assert.equal(mod?.expandable, undefined);
+    assert.equal(mod?.expandable, true);
     const greet = result.graph.nodes.find((n) => n.label === "greet" && n.kind === "function");
     const exp = result.graph.nodes.find((n) => n.kind === "export" && n.label === "greet");
     assert.ok(exp);
@@ -255,14 +274,22 @@ describe("extractGraph", () => {
         e.targetHandle === "in"
     );
     assert.ok(ret);
-    // No module well — file chrome lives in the tab title.
-    assert.equal(
+    // Module well: worker flow enters at flow-well-in and exits at flow-well-out.
+    assert.ok(
       result.graph.edges.some(
         (e) =>
           e.kind === "flow" &&
-          (e.source === mod?.id || e.target === mod?.id)
-      ),
-      false
+          e.source === mod?.id &&
+          e.sourceHandle === "flow-well-in"
+      )
+    );
+    assert.ok(
+      result.graph.edges.some(
+        (e) =>
+          e.kind === "flow" &&
+          e.target === mod?.id &&
+          e.targetHandle === "flow-well-out"
+      )
     );
     assert.equal(
       result.graph.edges.some(

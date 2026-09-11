@@ -26,6 +26,22 @@ export type MemberKind = "constructor" | "method" | "get" | "set";
 
 export type BindingKind = "const" | "let" | "var" | "prop";
 
+/**
+ * Best-effort runtime value kind for binding icons (from initializer AST).
+ * `unknown` when we can't tell statically.
+ */
+export type ValueType =
+  | "function"
+  | "string"
+  | "number"
+  | "boolean"
+  | "object"
+  | "array"
+  | "null"
+  | "undefined"
+  | "class"
+  | "unknown";
+
 export interface SourceLoc {
   startLine: number;
   startCol: number;
@@ -65,6 +81,13 @@ export interface GraphNode {
   scopeId?: string;
   /** const | let | var for locals; prop for member assignment targets (this.x / obj.x) */
   bindingKind?: BindingKind;
+  /** Inferred value kind for binding icons (from initializer when present). */
+  valueType?: ValueType;
+  /**
+   * For anonymous function/arrow expressions stored in a binding: the binding's
+   * identifier (used for call resolution; label stays "() => {}" / "function() {}").
+   */
+  bindingName?: string;
   /** For call nodes: id of the declaration/definition this call refers to */
   refId?: string;
   /** Function/arrow/method/class can expand to show body (or class members) */

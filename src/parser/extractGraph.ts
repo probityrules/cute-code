@@ -11,6 +11,7 @@ import type {
   ParseErrorPayload,
   SourceLoc,
   StructureGraph,
+  ValueType,
 } from "../shared/graph";
 import { locKey, orderByExecution } from "../shared/executionOrder";
 
@@ -173,6 +174,24 @@ function bindingKindOf(path: NodePath<t.VariableDeclarator>): BindingKind {
     if (k === "const" || k === "let" || k === "var") return k;
   }
   return "var";
+}
+
+/** Best-effort value kind from an initializer expression (for binding icons). */
+function inferValueType(init: t.Expression | null | undefined): ValueType {
+  if (!init) return "undefined";
+  if (t.isStringLiteral(init) || t.isTemplateLiteral(init) || t.isTaggedTemplateExpression(init)) {
+    return "string";
+  }
+  if (t.isNumericLiteral(init) || t.isBigIntLiteral(init)) return "number";
+  if (t.isBooleanLiteral(init)) return "boolean";
+  if (t.isNullLiteral(init)) return "null";
+  if (t.isIdentifier(init) && init.name === "undefined") return "undefined";
+  if (t.isArrayExpression(init)) return "array";
+  if (t.isObjectExpression(init) || t.isRegExpLiteral(init)) return "object";
+  if (t.isFunctionExpression(init) || t.isArrowFunctionExpression(init)) return "function";
+  if (t.isClassExpression(init)) return "class";
+  if (t.isNewExpression(init)) return "object";
+  return "unknown";
 }
 
 /** Templates, operators, literals, concats — shown as inline equation/value blocks. */
@@ -375,6 +394,8 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
     params: [],
     loc: locOf(ast.program),
     scopeId: MODULE_ID,
+    /** Always-open file chrome: flow enters/exits the module well. */
+    expandable: true,
   });
 
   function addNode(node: GraphNode) {
@@ -667,22 +688,41 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
         const name = path.node.id.name;
 
         if (init && (t.isFunctionExpression(init) || t.isArrowFunctionExpression(init))) {
-          const kind = t.isArrowFunctionExpression(init) ? "arrow" : "function";
-          const id = `${kind === "arrow" ? "arrow" : "fn"}:${name}:L${line}`;
-          nameToId.set(name, id);
+          const isArrow = t.isArrowFunctionExpression(init);
+          const kind = isArrow ? "arrow" : "function";
+          const fnId = `${isArrow ? "arrow" : "fn"}:${name}:L${line}`;
+          const bindingId = `binding:${name}:L${line}`;
+          nameToId.set(name, fnId);
           addNode({
-            id,
+            id: fnId,
             kind,
-            label: name,
+            label: isArrow ? "() => {}" : "function() {}",
             params: paramNames(init.params),
             returnsLabel: simpleReturnLabel(init.body),
-            loc: locOf(path.node),
-            nameLoc: locOf(path.node.id),
+            loc: locOf(init),
             parentId: outerScope === MODULE_ID ? MODULE_ID : outerScope,
             scopeId: outerScope,
             expandable: true,
+            bindingName: name,
             async: init.async || undefined,
             generator: t.isFunctionExpression(init) ? init.generator || undefined : undefined,
+          });
+          addNode({
+            id: bindingId,
+            kind: "binding",
+            label: name,
+            params: [],
+            bindingKind: bk,
+            valueType: "function",
+            loc: locOf(path.node),
+            nameLoc: locOf(path.node.id),
+            scopeId: outerScope,
+            parentId: outerScope === MODULE_ID ? undefined : outerScope,
+          });
+          registerBinding(outerScope, name, bindingId);
+          addEdge("thread", fnId, bindingId, "assign", {
+            sourceHandle: "out",
+            targetHandle: "in",
           });
           return;
         }
@@ -694,11 +734,13 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           label: name,
           params: [],
           bindingKind: bk,
+          valueType: inferValueType(init ?? undefined),
           loc: locOf(path.node),
           nameLoc: locOf(path.node.id),
           scopeId: outerScope,
           parentId: outerScope === MODULE_ID ? undefined : outerScope,
         });
+        registerBinding(outerScope, name, id);
         return;
       }
 
@@ -1183,7 +1225,11 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
   nameToId.clear();
   for (const n of nodes) {
     if (n.kind === "function" || n.kind === "arrow" || n.kind === "import" || n.kind === "external") {
-      nameToId.set(n.label, n.id);
+      const resolveName = n.bindingName ?? n.label;
+      // Skip anonymous display labels like "() => {}" unless bindingName is set.
+      if (resolveName && resolveName !== "() => {}" && resolveName !== "function() {}") {
+        nameToId.set(resolveName, n.id);
+      }
     }
     if (n.kind === "method") {
       const full = n.id.replace(/^method:/, "").replace(/:L\d+$/, "");

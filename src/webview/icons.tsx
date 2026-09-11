@@ -4,7 +4,13 @@
  */
 import { Icon, addIcon } from "@iconify/react/dist/offline";
 import type { IconifyIcon } from "@iconify/types";
-import type { BindingKind, EdgeKind, MemberKind, NodeKind } from "../shared/graph";
+import type {
+  BindingKind,
+  EdgeKind,
+  MemberKind,
+  NodeKind,
+  ValueType,
+} from "../shared/graph";
 
 const lucide: Record<string, IconifyIcon> = {
   "maximize-2": {
@@ -79,6 +85,41 @@ const lucide: Record<string, IconifyIcon> = {
   },
   lock: {
     body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></g>',
+    width: 24,
+    height: 24,
+  },
+  quote: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2zm-11 0a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/></g>',
+    width: 24,
+    height: 24,
+  },
+  hash: {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 9h16M4 15h16M10 3L8 21M16 3l-2 18"/>',
+    width: 24,
+    height: 24,
+  },
+  "toggle-left": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="20" height="12" x="2" y="6" rx="6" ry="6"/><circle cx="8" cy="12" r="2"/></g>',
+    width: 24,
+    height: 24,
+  },
+  braces: {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1m8-18h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>',
+    width: 24,
+    height: 24,
+  },
+  brackets: {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 3h3v18h-3M8 21H5V3h3"/>',
+    width: 24,
+    height: 24,
+  },
+  "circle-off": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m2 2l20 20"/><path d="M8.35 2.69A10 10 0 0 1 21.3 15.65M19.08 19.08A10 10 0 1 1 4.92 4.92"/></g>',
+    width: 24,
+    height: 24,
+  },
+  "circle-help": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3m.08 4h.01"/></g>',
     width: 24,
     height: 24,
   },
@@ -177,6 +218,41 @@ const lucide: Record<string, IconifyIcon> = {
     width: 24,
     height: 24,
   },
+  focus: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></g>',
+    width: 24,
+    height: 24,
+  },
+  "eye-off": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575a1 1 0 0 1 0 .696a10.8 10.8 0 0 1-1.444 2.49m-6.41-.679a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151a1 1 0 0 1 0-.696a10.75 10.75 0 0 1 4.446-5.143M2 2l20 20"/></g>',
+    width: 24,
+    height: 24,
+  },
+  x: {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6L6 18M6 6l12 12"/>',
+    width: 24,
+    height: 24,
+  },
+  network: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="6" height="6" x="16" y="16" rx="1"/><rect width="6" height="6" x="2" y="16" rx="1"/><rect width="6" height="6" x="9" y="2" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3m-7-4V8"/></g>',
+    width: 24,
+    height: 24,
+  },
+  target: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></g>',
+    width: 24,
+    height: 24,
+  },
+  layers: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></g>',
+    width: 24,
+    height: 24,
+  },
+  radius: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20.34 17.52a10 10 0 1 0-2.82 2.82"/><circle cx="19" cy="19" r="2"/><path d="m13.41 13.41l4.18 4.18"/><circle cx="12" cy="12" r="2"/></g>',
+    width: 24,
+    height: 24,
+  },
 };
 
 for (const [name, data] of Object.entries(lucide)) {
@@ -227,9 +303,40 @@ export function IconThis({ size = 12 }: { size?: number } = {}) {
 
 type KindIconSpec = { icon: string; label: string };
 
+function valueTypeIconSpec(valueType: ValueType | undefined): KindIconSpec | undefined {
+  switch (valueType) {
+    case "function":
+      return { icon: "square-function", label: "Function value" };
+    case "string":
+      return { icon: "quote", label: "String" };
+    case "number":
+      return { icon: "hash", label: "Number" };
+    case "boolean":
+      return { icon: "toggle-left", label: "Boolean" };
+    case "object":
+      return { icon: "braces", label: "Object" };
+    case "array":
+      return { icon: "brackets", label: "Array" };
+    case "null":
+      return { icon: "circle-off", label: "Null" };
+    case "undefined":
+      return { icon: "circle-help", label: "Undefined" };
+    case "class":
+      return { icon: "boxes", label: "Class" };
+    case "unknown":
+      return { icon: "circle-help", label: "Unknown value" };
+    default:
+      return undefined;
+  }
+}
+
 function kindIconSpec(
   kind: NodeKind,
-  opts?: { memberKind?: MemberKind; bindingKind?: BindingKind }
+  opts?: {
+    memberKind?: MemberKind;
+    bindingKind?: BindingKind;
+    valueType?: ValueType;
+  }
 ): KindIconSpec {
   if (kind === "method") {
     switch (opts?.memberKind) {
@@ -244,6 +351,8 @@ function kindIconSpec(
     }
   }
   if (kind === "binding") {
+    const byValue = valueTypeIconSpec(opts?.valueType);
+    if (byValue) return byValue;
     switch (opts?.bindingKind) {
       case "const":
         return { icon: "lock", label: "const" };
@@ -261,7 +370,7 @@ function kindIconSpec(
     case "function":
       return { icon: "square-function", label: "Function" };
     case "arrow":
-      return { icon: "corner-down-right", label: "Arrow function" };
+      return { icon: "square-function", label: "Arrow function" };
     case "class":
       return { icon: "boxes", label: "Class" };
     case "import":
@@ -298,14 +407,16 @@ export function KindIcon({
   kind,
   memberKind,
   bindingKind,
+  valueType,
   size = 14,
 }: {
   kind: NodeKind;
   memberKind?: MemberKind;
   bindingKind?: BindingKind;
+  valueType?: ValueType;
   size?: number;
 }) {
-  const spec = kindIconSpec(kind, { memberKind, bindingKind });
+  const spec = kindIconSpec(kind, { memberKind, bindingKind, valueType });
   return (
     <span className="struct-kind-icon" title={spec.label} aria-label={spec.label}>
       <LucideIcon name={spec.icon} size={size} />
@@ -401,4 +512,39 @@ export const VIEW_MODES: ViewModeDef[] = [
 export function ViewModeIcon({ mode, size = 14 }: { mode: ViewMode; size?: number }) {
   const def = VIEW_MODES.find((t) => t.id === mode);
   return <LucideIcon name={def?.icon ?? "list-ordered"} size={size} />;
+}
+
+export type ArchitecturePresetId = "trace" | "coupling" | "dataflow" | "interface";
+
+const PRESET_ICONS: Record<ArchitecturePresetId, string> = {
+  trace: "zap",
+  coupling: "git-branch",
+  dataflow: "cable",
+  interface: "layers",
+};
+
+export function PresetIcon({
+  id,
+  size = 14,
+}: {
+  id: string;
+  size?: number;
+}) {
+  const icon = PRESET_ICONS[id as ArchitecturePresetId] ?? "workflow";
+  return <LucideIcon name={icon} size={size} />;
+}
+
+export function ToolbarLucideIcon({
+  name,
+  size = 15,
+}: {
+  name: string;
+  size?: number;
+}) {
+  return <LucideIcon name={name} size={size} />;
+}
+
+/** Focus neighborhood radius: 1-hop vs 2-hop. */
+export function FocusHopsIcon({ hops, size = 15 }: { hops: 1 | 2; size?: number }) {
+  return <LucideIcon name={hops === 1 ? "circle-dot" : "target"} size={size} />;
 }
