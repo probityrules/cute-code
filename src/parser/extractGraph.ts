@@ -190,8 +190,22 @@ function inferValueType(init: t.Expression | null | undefined): ValueType {
   if (t.isObjectExpression(init) || t.isRegExpLiteral(init)) return "object";
   if (t.isFunctionExpression(init) || t.isArrowFunctionExpression(init)) return "function";
   if (t.isClassExpression(init)) return "class";
-  if (t.isNewExpression(init)) return "object";
+  if (t.isNewExpression(init)) return "instance";
   return "unknown";
+}
+
+function instanceOfFromInit(init: t.Expression | null | undefined): string | undefined {
+  if (!init || !t.isNewExpression(init)) return undefined;
+  const callee = init.callee;
+  if (t.isIdentifier(callee)) return callee.name;
+  if (
+    (t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)) &&
+    !callee.computed &&
+    t.isIdentifier(callee.property)
+  ) {
+    return callee.property.name;
+  }
+  return undefined;
 }
 
 /** Templates, operators, literals, concats — shown as inline equation/value blocks. */
@@ -735,6 +749,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           params: [],
           bindingKind: bk,
           valueType: inferValueType(init ?? undefined),
+          instanceOf: instanceOfFromInit(init ?? undefined),
           loc: locOf(path.node),
           nameLoc: locOf(path.node.id),
           scopeId: outerScope,
@@ -1680,6 +1695,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
       nameLoc: callNameLoc,
       scopeId,
       refId: resolved?.id,
+      callKind: "call",
       parentId: scopeId === MODULE_ID ? undefined : scopeId,
       receiver,
       hasThis: Boolean(isMethod),
@@ -1758,6 +1774,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
             params: ["source"],
             loc: locOf(path.node),
             scopeId,
+            callKind: "call",
             parentId: scopeId === MODULE_ID ? undefined : scopeId,
             importSource,
           });
@@ -1854,6 +1871,7 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
           params: ["source"],
           loc: locOf(path.node),
           scopeId,
+          callKind: "call",
           parentId: scopeId === MODULE_ID ? undefined : scopeId,
           importSource,
         });
@@ -1922,14 +1940,19 @@ export function extractGraph(code: string, fileName?: string): ExtractResult {
 
         const hasRest = path.node.arguments.some((a) => t.isSpreadElement(a));
 
+        const newNameLoc =
+          t.isIdentifier(callee) ? locOf(callee) : undefined;
         addNode({
           id: callId,
           kind: "call",
           label: `new ${resolved.label}()`,
           params: callParams,
           loc: locOf(path.node),
+          nameLoc: newNameLoc,
           scopeId,
           refId: resolved.id,
+          callKind: "new",
+          instanceOf: resolved.label,
           parentId: scopeId === MODULE_ID ? undefined : scopeId,
           hasRestParam: hasRest || undefined,
         });

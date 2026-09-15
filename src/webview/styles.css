@@ -287,6 +287,57 @@ body,
   transform: translateY(-1px);
 }
 
+/* Definitions = type plates; instances = runtime tokens. */
+.struct-node.is-definition:not(.expanded-decl) {
+  border-radius: 5px;
+}
+
+.struct-node.is-definition:not(.expanded-decl):not(.method-block)::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 1px dashed color-mix(in srgb, var(--node-fg) 28%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.struct-node.is-definition .struct-title-row,
+.struct-node.is-definition .decl-header,
+.struct-node.is-definition .struct-params,
+.struct-node.is-definition .struct-returns,
+.struct-node.is-definition .struct-extends,
+.struct-node.is-definition .struct-ref-caption {
+  position: relative;
+  z-index: 1;
+}
+
+.struct-node.is-instance {
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--accent) 58%, var(--bg));
+  outline: 1.5px dashed color-mix(in srgb, var(--accent) 78%, var(--node-fg));
+  outline-offset: -2px;
+}
+
+body.vscode-light .struct-node.is-instance {
+  background: color-mix(in srgb, var(--accent) 72%, #fff);
+}
+
+.struct-node.kind-construct {
+  --accent: var(--accent-class);
+}
+
+.kind-binding.kind-construct {
+  --accent: color-mix(in srgb, var(--accent-class) 72%, var(--accent-binding));
+}
+
+.struct-node.kind-construct .struct-label {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--node-fg) 42%, transparent);
+}
+
 .react-flow__node.is-demoted {
   filter: saturate(0.55);
 }

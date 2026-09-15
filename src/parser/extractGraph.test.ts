@@ -30,6 +30,8 @@ describe("extractGraph", () => {
     assert.ok(ref);
     const greetDecl = result.graph.nodes.find((n) => n.kind === "function" && n.label === "greet");
     assert.equal(ref?.target, greetDecl?.id);
+    const greetCall = result.graph.nodes.find((n) => n.kind === "call" && n.label === "greet()");
+    assert.equal(greetCall?.callKind, "call");
     // return format(name) → format() out into greet's return handle
     const formatCall = result.graph.nodes.find((n) => n.kind === "call" && n.label === "format()");
     const ret = result.graph.edges.find(
@@ -567,6 +569,10 @@ describe("extractGraph", () => {
       (n) => n.kind === "binding" && n.label === "g" && n.scopeId === main?.id
     );
     assert.ok(lit && neo && binding);
+    assert.equal(neo?.callKind, "new");
+    assert.equal(neo?.instanceOf, "Greeter");
+    assert.equal(binding?.valueType, "instance");
+    assert.equal(binding?.instanceOf, "Greeter");
     const litToNew = result.graph.edges.find(
       (e) =>
         e.kind === "thread" &&

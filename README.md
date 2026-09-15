@@ -6,16 +6,16 @@ V1 is **visual only** (editor → graph). The graph IR and webview message proto
 
 ## Features
 
-- **Cute Code: Open Structure View** — opens a side panel next to the editor
-- Parses the active `.js` / `.jsx` / `.mjs` / `.cjs` file with Babel
+- **Title-bar toggle** on a `.js` / `.jsx` / `.mjs` / `.cjs` tab — hierarchy icon opens Cute Code in that same tab; code icon returns to the text editor
+- Parses the file with Babel
 - Blocks for module, functions, arrows, classes/methods, imports, exports, bindings, and call sites
 - Declarations along the top; calls are separate blocks with a dashed **def** thread to the declaration
 - Double-click a declaration to expand (bindings, nested decls, calls); double-click a call to jump to its definition
 - `const` / `let` / `var` bindings thread into the calls that use them (scoped inside expanded functions)
 - Class stacks with drag reorder (visual only)
-- Click a block to jump to its source range
-- Auto-refresh on edit (300ms debounce) and active-editor change
-- Parse errors shown in the panel with line/column when available
+- Click a block to reveal its source range in the other editor group (graph stays open)
+- Auto-refresh on edit (300ms debounce)
+- Parse errors shown in the graph tab with line/column when available
 
 ## Run (Extension Development Host)
 
@@ -26,7 +26,7 @@ V1 is **visual only** (editor → graph). The graph IR and webview message proto
 5. In **that** window, open `examples/sample.js`
 6. Click the hierarchy icon in the editor title bar, or Command Palette → **Cute Code: Open Structure View**
 
-The structure panel opens beside the editor. If you only run the command in your normal window (without F5), the extension is not loaded.
+The JS tab switches to the structure graph. Click a block to open/reveal source beside it. Click the code icon in the title bar to return to the text editor. If you only run the command in your normal window (without F5), the extension is not loaded.
 
 ## Scripts
 
@@ -38,7 +38,7 @@ The structure panel opens beside the editor. If you only run the command in your
 
 ## Architecture
 
-- `src/extension.ts` — commands, webview host, editor sync, reveal-on-click
+- `src/extension.ts` — custom text editor, title-bar toggle, editor sync, reveal-on-click
 - `src/parser/extractGraph.ts` — Babel parse + structural extraction
 - `src/shared/graph.ts` — Graph IR + host/webview messages (`setGraph`, `selectNode`, `ready`; reserved `applyEdit` / `graphChanged`)
 - `src/webview/` — React Flow UI with dagre layout

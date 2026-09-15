@@ -26,6 +26,9 @@ export type MemberKind = "constructor" | "method" | "get" | "set";
 
 export type BindingKind = "const" | "let" | "var" | "prop";
 
+/** Call-site shape: `foo()` vs `new Foo()`. */
+export type CallKind = "call" | "new";
+
 /**
  * Best-effort runtime value kind for binding icons (from initializer AST).
  * `unknown` when we can't tell statically.
@@ -40,6 +43,8 @@ export type ValueType =
   | "null"
   | "undefined"
   | "class"
+  /** Result of `new Foo()` — an instance, not the class itself. */
+  | "instance"
   | "unknown";
 
 export interface SourceLoc {
@@ -90,6 +95,13 @@ export interface GraphNode {
   bindingName?: string;
   /** For call nodes: id of the declaration/definition this call refers to */
   refId?: string;
+  /** For call nodes: `foo()` vs `new Foo()`. */
+  callKind?: CallKind;
+  /**
+   * Class (or constructor) this node instantiates — `new Greeter()` and
+   * bindings that hold that result (`const g = new Greeter()`).
+   */
+  instanceOf?: string;
   /** Function/arrow/method/class can expand to show body (or class members) */
   expandable?: boolean;
   /** Module specifier for import nodes (e.g. "./util" or "fs") */

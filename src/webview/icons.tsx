@@ -48,6 +48,11 @@ const lucide: Record<string, IconifyIcon> = {
     width: 24,
     height: 24,
   },
+  copy: {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></g>',
+    width: 24,
+    height: 24,
+  },
   hammer: {
     body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m15 12l-9.373 9.373a1 1 0 0 1-3.001-3L12 9m6 6l4-4"/><path d="m21.5 11.5l-1.914-1.914A2 2 0 0 1 19 8.172v-.344a2 2 0 0 0-.586-1.414l-1.657-1.657A6 6 0 0 0 12.516 3H9l1.243 1.243A6 6 0 0 1 12 8.485V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/></g>',
     width: 24,
@@ -323,6 +328,8 @@ function valueTypeIconSpec(valueType: ValueType | undefined): KindIconSpec | und
       return { icon: "circle-help", label: "Undefined" };
     case "class":
       return { icon: "boxes", label: "Class" };
+    case "instance":
+      return { icon: "copy", label: "Instance" };
     case "unknown":
       return { icon: "circle-help", label: "Unknown value" };
     default:
@@ -336,6 +343,7 @@ function kindIconSpec(
     memberKind?: MemberKind;
     bindingKind?: BindingKind;
     valueType?: ValueType;
+    callKind?: "call" | "new";
   }
 ): KindIconSpec {
   if (kind === "method") {
@@ -380,7 +388,9 @@ function kindIconSpec(
     case "external":
       return { icon: "globe", label: "External" };
     case "call":
-      return { icon: "zap", label: "Call (double-click → definition)" };
+      return opts?.callKind === "new"
+        ? { icon: "copy", label: "Instance (new)" }
+        : { icon: "zap", label: "Call (double-click → definition)" };
     case "expression":
       return { icon: "sigma", label: "Expression" };
     case "module":
@@ -408,15 +418,17 @@ export function KindIcon({
   memberKind,
   bindingKind,
   valueType,
+  callKind,
   size = 14,
 }: {
   kind: NodeKind;
   memberKind?: MemberKind;
   bindingKind?: BindingKind;
   valueType?: ValueType;
+  callKind?: "call" | "new";
   size?: number;
 }) {
-  const spec = kindIconSpec(kind, { memberKind, bindingKind, valueType });
+  const spec = kindIconSpec(kind, { memberKind, bindingKind, valueType, callKind });
   return (
     <span className="struct-kind-icon" title={spec.label} aria-label={spec.label}>
       <LucideIcon name={spec.icon} size={size} />

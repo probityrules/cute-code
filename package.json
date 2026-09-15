@@ -2,7 +2,7 @@
   "name": "cute-code",
   "displayName": "Cute Code",
   "description": "Visual structural AST view of JavaScript - functions, classes, calls, and returns as interconnected blocks.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "cute-code",
   "engines": {
     "vscode": "^1.85.0"
@@ -13,23 +13,45 @@
   ],
   "activationEvents": [
     "onLanguage:javascript",
-    "onLanguage:javascriptreact",
-    "onCommand:cuteCode.openStructureView"
+    "onLanguage:javascriptreact"
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "customEditors": [
+      {
+        "viewType": "cuteCode.structure",
+        "displayName": "Cute Code",
+        "selector": [
+          { "filenamePattern": "*.js" },
+          { "filenamePattern": "*.jsx" },
+          { "filenamePattern": "*.mjs" },
+          { "filenamePattern": "*.cjs" }
+        ],
+        "priority": "option"
+      }
+    ],
     "commands": [
       {
         "command": "cuteCode.openStructureView",
         "title": "Cute Code: Open Structure View",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "cuteCode.showSource",
+        "title": "Cute Code: Show Source",
+        "icon": "$(code)"
       }
     ],
     "menus": {
       "editor/title": [
         {
           "command": "cuteCode.openStructureView",
-          "when": "resourceLangId == javascript || resourceLangId == javascriptreact",
+          "when": "resourceScheme == file && (resourceLangId == javascript || resourceLangId == javascriptreact) && activeCustomEditorId == ''",
+          "group": "navigation"
+        },
+        {
+          "command": "cuteCode.showSource",
+          "when": "activeCustomEditorId == 'cuteCode.structure'",
           "group": "navigation"
         }
       ]

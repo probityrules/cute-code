@@ -31,6 +31,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type {
   BindingKind,
+  CallKind,
   EdgeKind,
   GraphEdge,
   GraphNode,
@@ -182,6 +183,7 @@ function KindTitle({
   memberKind,
   bindingKind,
   valueType,
+  callKind,
   receiver,
   async: isAsync,
   generator,
@@ -196,6 +198,7 @@ function KindTitle({
   memberKind?: MemberKind;
   bindingKind?: BindingKind;
   valueType?: ValueType;
+  callKind?: CallKind;
   /** When `"this"`, show a small this glyph before the title. */
   receiver?: string;
   async?: boolean;
@@ -244,6 +247,7 @@ function KindTitle({
         memberKind={memberKind}
         bindingKind={bindingKind}
         valueType={valueType}
+        callKind={callKind}
       />
       {receiver === "this" && <IconThis />}
       {editing ? (
@@ -352,6 +356,32 @@ const KIND_CLASS: Record<NodeKind, string> = {
   fragment: "kind-fragment",
 };
 
+const DEFINITION_KINDS: ReadonlySet<NodeKind> = new Set([
+  "function",
+  "arrow",
+  "method",
+  "class",
+]);
+
+/** Definition (type plate) vs instance (runtime token) chrome. */
+function roleClassName(d: {
+  kind: NodeKind;
+  callKind?: CallKind;
+  valueType?: ValueType;
+}): string {
+  const parts: string[] = [];
+  if (DEFINITION_KINDS.has(d.kind) || d.valueType === "class") {
+    parts.push("is-definition");
+  }
+  if (d.kind === "call" || d.valueType === "instance") {
+    parts.push("is-instance");
+  }
+  if (d.callKind === "new" || d.valueType === "instance") {
+    parts.push("kind-construct");
+  }
+  return parts.join(" ");
+}
+
 export const STACK_W = 200;
 export const HEADER_H = 58;
 export const MEMBER_H = 62;
@@ -404,6 +434,8 @@ type NodeData = {
   scopeId?: string;
   bindingKind?: BindingKind;
   valueType?: ValueType;
+  callKind?: CallKind;
+  instanceOf?: string;
   bindingName?: string;
   refId?: string;
   /** Call/extends caption for ref-labels mode */
@@ -642,7 +674,7 @@ function StructureNodeView({ data, selected, id }: NodeProps) {
 
   return (
     <div
-      className={`struct-node ${KIND_CLASS[d.kind]} ${selected ? "selected" : ""} ${expanded ? "expanded-decl" : ""} ${d.expandable ? "has-action" : ""} ${isImport ? "has-action" : ""}`}
+      className={`struct-node ${KIND_CLASS[d.kind]} ${roleClassName(d)} ${selected ? "selected" : ""} ${expanded ? "expanded-decl" : ""} ${d.expandable ? "has-action" : ""} ${isImport ? "has-action" : ""}`}
       style={expanded ? { width: "100%", height: "100%" } : undefined}
     >
       <FlowHandles step={d.flowStep} />
@@ -802,7 +834,7 @@ function ClassHeaderView({ data, selected, id }: NodeProps) {
   const outVisible = threadMode === "lines" || returnsMode === "lines";
   return (
     <div
-      className={`struct-node class-header ${KIND_CLASS.class} ${selected ? "selected" : ""} ${expanded ? "expanded-decl" : ""} ${d.expandable ? "has-action" : ""}`}
+      className={`struct-node class-header ${KIND_CLASS.class} ${roleClassName(d)} ${selected ? "selected" : ""} ${expanded ? "expanded-decl" : ""} ${d.expandable ? "has-action" : ""}`}
       style={expanded ? { width: "100%", height: "100%" } : undefined}
     >
       <FlowHandles step={d.flowStep} />
@@ -894,7 +926,7 @@ function MethodBlockView({ data, selected, id }: NodeProps) {
   const showThreadLabels = threadMode === "labels";
   return (
     <div
-      className={`struct-node method-block ${KIND_CLASS.method} ${selected ? "selected" : ""} member-${kindLabel} ${d.expandable ? "has-action" : ""} ${expanded ? "expanded-decl" : ""}`}
+      className={`struct-node method-block ${KIND_CLASS.method} ${roleClassName(d)} ${selected ? "selected" : ""} member-${kindLabel} ${d.expandable ? "has-action" : ""} ${expanded ? "expanded-decl" : ""}`}
       style={expanded ? { width: "100%", height: "100%" } : undefined}
     >
       <FlowHandles step={d.flowStep} />
@@ -1003,7 +1035,7 @@ function BindingNodeView({ data, selected, id }: NodeProps) {
   const threadLines = threadMode === "lines";
   return (
     <div
-      className={`struct-node kind-binding ${isProp ? "kind-prop" : ""} ${d.pattern ? "kind-pattern" : ""} ${d.slotOf ? "kind-slot" : ""} ${selected ? "selected" : ""} ${d.hasThis ? "has-this" : ""}`}
+      className={`struct-node kind-binding ${roleClassName(d)} ${isProp ? "kind-prop" : ""} ${d.pattern ? "kind-pattern" : ""} ${d.slotOf ? "kind-slot" : ""} ${selected ? "selected" : ""} ${d.hasThis ? "has-this" : ""}`}
     >
       <FlowHandles step={d.flowStep} />
       <Handle
@@ -1030,6 +1062,9 @@ function BindingNodeView({ data, selected, id }: NodeProps) {
         nameLoc={d.pattern || d.slotOf ? undefined : d.nameLoc}
         nodeId={nodeId}
       />
+      {d.instanceOf && (
+        <div className="struct-ref-caption">{d.instanceOf}</div>
+      )}
       {d.pattern && d.params.length > 0 && (
         <div className="struct-params">
           {d.params.map((p, i) => (
@@ -1164,7 +1199,7 @@ function CallNodeView({ data, selected, id }: NodeProps) {
   const threadLines = threadMode === "lines";
   return (
     <div
-      className={`struct-node kind-call ${selected ? "selected" : ""} ${d.hasThis ? "has-this" : ""}`}
+      className={`struct-node kind-call ${roleClassName(d)} ${selected ? "selected" : ""} ${d.hasThis ? "has-this" : ""}`}
       style={leftCount > 2 ? { minHeight: 28 + leftCount * 18 } : undefined}
       title="Double-click to jump to definition"
     >
@@ -1241,6 +1276,7 @@ function CallNodeView({ data, selected, id }: NodeProps) {
       <KindTitle
         kind="call"
         label={d.label}
+        callKind={d.callKind}
         receiver={d.receiver}
         hasOptional={d.hasOptional}
         nameLoc={d.nameLoc}
@@ -1359,6 +1395,8 @@ function graphToNodeData(
     scopeId: n.scopeId,
     bindingKind: n.bindingKind,
     valueType: n.valueType,
+    callKind: n.callKind,
+    instanceOf: n.instanceOf,
     bindingName: n.bindingName,
     refId: n.refId,
     expandable: n.expandable,
@@ -3838,8 +3876,18 @@ function FlowApp() {
                   if (kind === "class") return "var(--accent-class)";
                   if (kind === "method" || kind === "function" || kind === "arrow")
                     return "var(--accent-function)";
-                  if (kind === "binding") return "var(--accent-binding)";
-                  if (kind === "call") return "var(--accent-call)";
+                  if (kind === "binding") {
+                    if ((n.data as NodeData)?.valueType === "instance") {
+                      return "var(--accent-class)";
+                    }
+                    return "var(--accent-binding)";
+                  }
+                  if (kind === "call") {
+                    if ((n.data as NodeData)?.callKind === "new") {
+                      return "var(--accent-class)";
+                    }
+                    return "var(--accent-call)";
+                  }
                   if (kind === "expression") return "var(--accent-expression)";
                   if (kind === "import") return "var(--accent-import)";
                   if (kind === "export") return "var(--accent-export)";
