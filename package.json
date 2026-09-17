@@ -5,6 +5,32 @@
   "version": "0.3.0",
   "license": "MIT",
   "publisher": "cute-code",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1f6b4f",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/probityrules/cute-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/probityrules/cute-code/issues"
+  },
+  "homepage": "https://github.com/probityrules/cute-code#readme",
+  "keywords": [
+    "javascript",
+    "jsx",
+    "ast",
+    "visualization",
+    "structure",
+    "graph",
+    "call graph",
+    "code map",
+    "react flow",
+    "babel"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -23,10 +49,18 @@
         "viewType": "cuteCode.structure",
         "displayName": "Cute Code",
         "selector": [
-          { "filenamePattern": "*.js" },
-          { "filenamePattern": "*.jsx" },
-          { "filenamePattern": "*.mjs" },
-          { "filenamePattern": "*.cjs" }
+          {
+            "filenamePattern": "*.js"
+          },
+          {
+            "filenamePattern": "*.jsx"
+          },
+          {
+            "filenamePattern": "*.mjs"
+          },
+          {
+            "filenamePattern": "*.cjs"
+          }
         ],
         "priority": "option"
       }
@@ -62,6 +96,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "test": "node --import tsx --test src/parser/extractGraph.test.ts src/parser/titleEdit.test.ts src/webview/presentation.test.ts",
+    "package": "vsce package",
     "vscode:prepublish": "npm run build"
   },
   "devDependencies": {
@@ -71,7 +106,9 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.20.0",
+    "ovsx": "^1.2.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   },
