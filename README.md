@@ -50,6 +50,28 @@ If you run the command in your normal window (without F5), the extension is not 
 | `npm test` | Unit tests |
 | `npm run package` | Build a `.vsix` with `@vscode/vsce` |
 
+### Publishing (GitHub Actions + OIDC)
+
+Releases use **trusted publishing** — no Azure DevOps PAT. The `publish.yml` workflow calls `vsce publish --oidc`.
+
+**One-time setup**
+
+1. Create publisher `cute-code` at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage)
+2. Under that publisher, add a **Trusted publishing** → **GitHub Actions** policy:
+   - Organization or user: `probityrules`
+   - Repository: `cute-code`
+   - Workflow filename: `publish.yml`
+   - Environment name: `vscode-marketplace`
+3. In GitHub: **Settings → Environments → New environment** named `vscode-marketplace`
+
+**Release**
+
+1. Bump `version` in `package.json` and update `CHANGELOG.md`
+2. Commit, then tag and push: `git tag v0.3.0 && git push origin v0.3.0`
+3. The Publish workflow runs tests and publishes that version
+
+You can also run **Publish** via **Actions → workflow_dispatch**. Tag pushes require the tag (`vX.Y.Z`) to match `package.json` `version`.
+
 ### Architecture
 
 - `src/extension.ts` — custom text editor, title-bar toggle, editor sync, reveal-on-click
