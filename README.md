@@ -56,7 +56,7 @@ Releases use **trusted publishing** — no Azure DevOps PAT. The `publish.yml` w
 
 **One-time setup**
 
-1. Create publisher `cute-code` at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage)
+1. Use publisher `GopherwoodStudios` at [marketplace.visualstudio.com/manage](https://marketplace.visualstudio.com/manage)
 2. Under that publisher, add a **Trusted publishing** → **GitHub Actions** policy:
    - Organization or user: `probityrules`
    - Repository: `cute-code`

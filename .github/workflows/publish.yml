@@ -3,7 +3,7 @@
 # Auth: GitHub Actions OIDC trusted publishing (no PAT).
 #
 # One-time setup:
-# 1. Create publisher `cute-code` at https://marketplace.visualstudio.com/manage
+# 1. Publisher `GopherwoodStudios` at https://marketplace.visualstudio.com/manage
 # 2. Publisher → Trusted publishing → GitHub Actions, with:
 #      Organization or user: probityrules
 #      Repository:           cute-code
@@ -35,7 +35,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: vscode-marketplace
-      url: https://marketplace.visualstudio.com/items?itemName=cute-code.cute-code
+      url: https://marketplace.visualstudio.com/items?itemName=GopherwoodStudios.cute-code
     permissions:
       contents: read
       id-token: write
