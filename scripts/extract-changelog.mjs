@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -14,9 +14,9 @@ if (!version) {
 
 const
     changelog = fs.readFileSync(changelogPath, 'utf8').replace(/\r\n/g, '\n'),
-    // ## [1.2.3], ## 1.2.3, optional " - date" / " — date"
+    // ## [1.2.3] or ## 1.2.3, then optional rest of line (date, dash, etc.)
     headerRe = new RegExp(
-        `^## \\[?${version.replace(/\./g, '\\.')}\\]?(?:\\s*[\\u2014\\u2013\\-]\\s*.*)?$`,
+        `^## \\[?${version.replace(/\./g, '\\.')}\\]?\\b.*$`,
         'm'
     ),
     match = headerRe.exec(changelog);
