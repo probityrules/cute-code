@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect version bump
+        id: check
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "Manual run: releasing $CURRENT"
+            exit 0
+          fi
+          if ! git rev-parse HEAD^ >/dev/null 2>&1; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "Initial commit: releasing $CURRENT"
+            exit 0
+          fi
+          PREVIOUS=$(git show HEAD^:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          if [ "$PREVIOUS" = "$CURRENT" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "package.json version: $PREVIOUS -> $CURRENT"
+
+  release:
+    needs: detect-version
+    if: needs.detect-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Package VSIX
+        run: npm exec -- vsce package --out "cute-code-${{ needs.detect-version.outputs.version }}.vsix"
+
+      - name: Write release notes
+        run: node scripts/extract-changelog.mjs "${{ needs.detect-version.outputs.version }}" > release-notes.md
+
+      - name: Skip if release already exists
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ needs.detect-version.outputs.version }}"
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DRAFT=$(gh release view "$TAG" --repo "${{ github.repository }}" --json isDraft -q .isDraft)
+          if [ "$DRAFT" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Draft $TAG exists; will finish publishing."
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping."
+          fi
+
+      - name: Create GitHub release
+        if: steps.exists.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.detect-version.outputs.version }}
+          name: ${{ needs.detect-version.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            cute-code-${{ needs.detect-version.outputs.version }}.vsix
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+          make_latest: true

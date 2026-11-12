@@ -10,8 +10,8 @@
 #      Workflow filename:    publish.yml
 #      Environment name:     vscode-marketplace
 # 3. In GitHub: Settings → Environments → New environment → `vscode-marketplace`
-# 4. Bump `version` in package.json (and CHANGELOG), then:
-#      git tag v0.3.0 && git push origin v0.3.0
+# 4. Bump `version` in package.json (and CHANGELOG) on main — release.yml
+#    creates the v* tag (and GitHub Release), which triggers this workflow.
 #    Or run this workflow manually (workflow_dispatch).
 
 name: Publish

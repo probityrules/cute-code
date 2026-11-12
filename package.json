@@ -2,7 +2,7 @@
   "name": "cute-code",
   "displayName": "Cute Code",
   "description": "Visual structural AST view of JavaScript - functions, classes, calls, and returns as interconnected blocks.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "GopherwoodStudios",
   "license": "MIT",
   "icon": "media/icon.png",

@@ -2,6 +2,11 @@
 
 All notable changes to Cute Code are documented in this file.
 
+## [0.3.1] - 2026-11-12
+
+### Added
+- Automatic GitHub Releases on `package.json` version bumps (VSIX attached; Marketplace publish still follows the `v*` tag)
+
 ## [0.3.0] — 2026-09-15
 
 ### Changed
